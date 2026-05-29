@@ -1,0 +1,58 @@
+.data-table {
+  border-collapse: separate;
+  border-spacing: 0;
+
+  th,
+  td {
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+
+  th:last-child,
+  td:last-child {
+    border-right: none;
+  }
+
+  /* Header row — muted background, heavier bottom border */
+  thead {
+    position: relative;
+    z-index: 5;
+  }
+
+  thead th {
+    background-color: var(--muted);
+    border-bottom: 2px solid var(--border);
+    font-weight: 500;
+    font-size: 0.8125rem;
+    letter-spacing: 0.01em;
+    text-transform: none;
+  }
+
+  /* Remove header bottom border for last header row when no body rows */
+  thead tr:last-child th {
+    border-bottom: 1px solid var(--border);
+  }
+
+
+  /* Zebra striping for readability */
+  tbody tr:nth-child(even) {
+    background-color: color-mix(in srgb, var(--muted) 40%, transparent);
+  }
+
+  /* Pinned cells need explicit bg so sticky works */
+  .data-table-cell-pinned {
+    position: sticky;
+    z-index: 1;
+    background-color: var(--background);
+  }
+
+  /* Pinned header cells: muted bg + sticky */
+  thead .data-table-cell-pinned {
+    background-color: var(--muted);
+  }
+
+  /* Even-row pinned cells need the even-row bg */
+  tbody tr:nth-child(even) .data-table-cell-pinned {
+    background-color: color-mix(in srgb, var(--muted) 40%, var(--background));
+  }
+}

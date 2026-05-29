@@ -1,0 +1,125 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.4.15/schema.json",
+  "files": {
+    "includes": [
+      "**/*.ts",
+      "**/*.tsx",
+      "**/*.js",
+      "**/*.jsx",
+      "!dist",
+      "!node_modules"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "correctness": {
+        "noUnusedVariables": "error",
+        "noUnusedImports": "error"
+      },
+      "style": {
+        "useConst": "error",
+        "useForOf": "error",
+        "useNamingConvention": {
+          "level": "error",
+          "options": {
+            "strictCase": true,
+            "conventions": [
+              {
+                "selector": { "kind": "variable" },
+                "match": "[a-zA-Z][a-zA-Z0-9]*",
+                "formats": ["camelCase", "PascalCase"]
+              }
+            ]
+          }
+        }
+      },
+      "suspicious": {
+        "noExplicitAny": "warn"
+      },
+      "complexity": {
+        "noForEach": "off"
+      }
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single",
+      "semicolons": "always",
+      "trailingCommas": "all"
+    }
+  },
+  "overrides": [
+    {
+      "includes": [
+        "src/api/**",
+        "src/i18n/**",
+        "src/stores/**",
+        "src/components/form/**",
+        "src/components/ui/**",
+        "src/lib/utils/**",
+        "src/utils/**"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "useNamingConvention": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["src/pages/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["sonner"],
+                    "message": "禁止在 pages 中直接导入 sonner。错误提示已由 API 层统一处理；如需成功/信息提示请使用 import { toast } from '@/utils/toast'。"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "src/pages/**",
+        "!**/options.ts",
+        "!src/pages/login/**",
+        "!src/pages/exchange/**",
+        "!src/pages/profile/**",
+        "!src/pages/chat/**"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["@/api", "@/api/*"],
+                    "message": "@/api 下的模块只能在 options.ts 中导入。请在对应页面的 options.ts 中完成必要的校验封装后重导出，然后从 ./options 导入。"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

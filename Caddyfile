@@ -1,0 +1,47 @@
+# http:// prefix disables automatic HTTPS (cert provisioning + redirect).
+# Remove the prefix when deploying with a real public domain.
+http://{$DOMAIN:localhost} {
+    # ── Security headers ──────────────────────────────────────────
+    header X-Content-Type-Options "nosniff"
+    header X-Frame-Options "DENY"
+    header Referrer-Policy "strict-origin-when-cross-origin"
+    header -Server
+
+    # ── Rate limiting ─────────────────────────────────────────────
+    rate_limit /api/auth/login {
+        key {remote_host}
+        rate 10/m
+    }
+    rate_limit /api/auth/captcha {
+        key {remote_host}
+        rate 10/m
+    }
+    rate_limit /api/* {
+        key {remote_host}
+        rate 200/m
+    }
+
+    # ── API reverse proxy ─────────────────────────────────────────
+    handle /api/* {
+        reverse_proxy {$BACKEND_HOST:backend}:{$BACKEND_PORT:5150} {
+            flush_interval -1
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+        }
+    }
+
+    # ── Static assets with long cache ─────────────────────────────
+    handle /static/* {
+        header Cache-Control "public, max-age=31536000, immutable"
+        file_server {
+            root /usr/share/caddy
+        }
+    }
+
+    # ── Frontend static files (SPA) ───────────────────────────────
+    handle {
+        root * /usr/share/caddy
+        try_files {path} /index.html
+        file_server
+    }
+}
