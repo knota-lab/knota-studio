@@ -127,8 +127,10 @@ const OverflowCell = ({
           </span>
         </TooltipTrigger>
         {isOverflowing && (
-          <TooltipContent>
-            <p className="max-w-80">{children}</p>
+          <TooltipContent className="max-h-[30vh] overflow-y-auto">
+            <div className="max-w-80 whitespace-pre-wrap break-words">
+              {children}
+            </div>
           </TooltipContent>
         )}
       </Tooltip>
