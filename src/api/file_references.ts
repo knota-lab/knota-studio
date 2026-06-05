@@ -82,8 +82,8 @@ export const listFileReferences = (
     {
       params: {
         page: params.page,
-        page_size: params.pageSize,
-        ...(params.resourceType ? { resource_type: params.resourceType } : {}),
+        pageSize: params.pageSize,
+        ...(params.resourceType ? { resourceType: params.resourceType } : {}),
       },
     },
   );

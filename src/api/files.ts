@@ -7,10 +7,10 @@
  *               + /api/sys/tenants/{tenantId}/file-uploads/*
  *
  * 上传策略 (Wave 4 — 严格"按需算 full hash"):
- *   - size <= SMALL_UPLOAD_LIMIT (5 MiB): 直接 small_upload (前端不算 hash)。
- *   - SMALL_UPLOAD_LIMIT < size < FAST_HASH_THRESHOLD (32 MiB):
+ *   - size <= smallUploadLimit (5 MiB): 直接 small_upload (前端不算 hash)。
+ *   - smallUploadLimit < size < fastHashThreshold (32 MiB):
  *       直接 multipart, expectedHash 省略 (后端 complete 阶段流式算)。
- *   - size >= FAST_HASH_THRESHOLD:
+ *   - size >= fastHashThreshold:
  *       (a) 算 fast-hash → POST /file-uploads/probe
  *           - Miss      → 跳到 (c) multipart (前端**不**算 full hash)
  *           - Suspect   → (b) 客户端秒传确认 (后端"邀请"前端补算 full hash)
@@ -36,22 +36,22 @@ import type { PaginatedResponse } from '@/types/common';
 // ---------- 常量 (与后端 file_upload_service.rs 对齐) ----------
 
 /** 后端 small upload 上限 (controllers/files.rs MAX_SMALL_UPLOAD_BYTES = 5 MiB)。 */
-export const SMALL_UPLOAD_LIMIT = 5 * 1024 * 1024;
+export const smallUploadLimit = 5 * 1024 * 1024;
 
 /** 后端 fast-hash 阈值 (file_upload_service.rs FAST_HASH_THRESHOLD = 32 MiB)。 */
-export const FAST_HASH_THRESHOLD = 32 * 1024 * 1024;
+export const fastHashThreshold = 32 * 1024 * 1024;
 
 /** 后端 fast-hash 三段窗口 (file_upload_service.rs FAST_HASH_WINDOW = 10 MiB)。 */
-export const FAST_HASH_WINDOW = 10 * 1024 * 1024;
+export const fastHashWindow = 10 * 1024 * 1024;
 
 /** Multipart 默认 partSize (服务端会按 partition_policy 重算并下发权威值)。 */
-export const DEFAULT_PART_SIZE = 5 * 1024 * 1024;
+export const defaultPartSize = 5 * 1024 * 1024;
 
 /** Multipart 客户端并发上限 (与设计文档保持一致: 5 MiB × 3)。 */
-export const MULTIPART_CONCURRENCY = 3;
+export const multipartConcurrency = 3;
 
 /** 文本/图片预览体积上限 (>20 MiB 不预览)。 */
-export const PREVIEW_SIZE_LIMIT = 20 * 1024 * 1024;
+export const previewSizeLimit = 20 * 1024 * 1024;
 
 // ---------- 类型 (与 src/views/files.rs / src/views/file_uploads.rs 对齐) ----------
 
@@ -276,7 +276,7 @@ export const listFiles = (
   sys?: SysScope,
 ) =>
   get<PaginatedResponse<FileResponse>>(scopePaths(sys).files, {
-    params: { page: params.page, page_size: params.pageSize },
+    params: { page: params.page, pageSize: params.pageSize },
   });
 
 export const getFile = (id: string, sys?: SysScope) =>
@@ -441,13 +441,13 @@ const readSlice = async (
  * + `fast_hash_sample_ranges` 严格对齐:
  *   blake3( head[0..10MiB] || mid[size/2 - 5MiB .. + 10MiB] || tail[size - 10MiB .. size] )
  *
- * - 仅在 size >= FAST_HASH_THRESHOLD (32 MiB) 时由调用方触发；调用方负责门控。
+ * - 仅在 size >= fastHashThreshold (32 MiB) 时由调用方触发；调用方负责门控。
  * - 后端**不**把 size 字段拼进 hasher，前端也禁止追加，否则必然 fast_hash_mismatch。
  * - 返回带前缀的字符串 `b3fast:<64hex>`。
  */
 export const computeFastHash = async (file: File): Promise<string> => {
   const size = file.size;
-  const w = FAST_HASH_WINDOW;
+  const w = fastHashWindow;
   const head = await readSlice(file, 0, w);
   const midStart = Math.floor(size / 2) - Math.floor(w / 2);
   const mid = await readSlice(file, midStart, midStart + w);
@@ -670,14 +670,14 @@ export const uploadFile = async (
   const sys = options?.sys;
 
   // 1) ≤5 MiB: 跳过 hash, 直接 small upload (后端会自己算 hash)。
-  if (file.size <= SMALL_UPLOAD_LIMIT) {
+  if (file.size <= smallUploadLimit) {
     options?.onPhaseChange?.('small-uploading');
     return smallUpload(file, sys);
   }
 
   // 2) ≥32 MiB: 先算 fast-hash 做 probe；Suspect 则走客户端秒传确认。
   let fastHash: string | undefined;
-  if (file.size >= FAST_HASH_THRESHOLD) {
+  if (file.size >= fastHashThreshold) {
     options?.onPhaseChange?.('hashing-fast');
     fastHash = await computeFastHash(file);
     options?.onPhaseChange?.('probing');
@@ -727,7 +727,7 @@ export const uploadFile = async (
       fileName: file.name,
       expectedSize: file.size,
       expectedHashAlgo: 'b3',
-      partSize: DEFAULT_PART_SIZE,
+      partSize: defaultPartSize,
       ...(fastHash ? { expectedHashFast: fastHash } : {}),
       ...(options?.mimeTypeHint ? { mimeTypeHint: options.mimeTypeHint } : {}),
     },
@@ -795,7 +795,7 @@ export const uploadFile = async (
     };
 
     const workers: Promise<void>[] = [];
-    const concurrency = Math.min(MULTIPART_CONCURRENCY, tasks.length);
+    const concurrency = Math.min(multipartConcurrency, tasks.length);
     for (let i = 0; i < concurrency; i += 1) workers.push(worker());
     await Promise.all(workers);
 

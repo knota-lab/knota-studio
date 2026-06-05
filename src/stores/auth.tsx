@@ -9,7 +9,7 @@ import {
   useState,
 } from 'react';
 import { getCurrentUser, login as loginRequest } from '@/api/auth';
-import { TOKEN_KEY } from '@/api/client';
+import { tokenKey } from '@/api/client';
 import { clearAllI18nCaches } from '@/i18n';
 import type { CurrentUserResponse } from '@/types/api';
 
@@ -30,14 +30,14 @@ type AuthContextValue = {
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [token, setToken] = useLocalStorageState<string | undefined>(TOKEN_KEY);
+  const [token, setToken] = useLocalStorageState<string | undefined>(tokenKey);
   const [user, setUser] = useState<CurrentUserResponse | null>(null);
   const [loading, setLoading] = useState(Boolean(token));
 
   const clearAuthState = useCallback(() => {
     setToken(undefined);
     setUser(null);
-    window.localStorage.removeItem(TOKEN_KEY);
+    window.localStorage.removeItem(tokenKey);
     clearAllI18nCaches();
   }, [setToken]);
 

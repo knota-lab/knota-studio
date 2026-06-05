@@ -7,7 +7,6 @@ export default defineConfig({
     tags: [
       {
         tag: 'script',
-        // biome-ignore lint/style/useNamingConvention: Rsbuild API requires camelCase 'innerHTML'
         innerHTML: `try{var d=JSON.parse(localStorage.getItem('knota-theme-dark'));if(d)document.documentElement.classList.add('dark')}catch(e){}`,
         appendTo: 'head',
         inject: 'prepend',

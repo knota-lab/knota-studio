@@ -104,7 +104,6 @@ const createToolCallLabels = (t: TFn): Record<string, string> => ({
 const createPhaseLabelMap = (
   t: TFn,
 ): Record<string, (detail: Record<string, unknown>) => string> => ({
-  // biome-ignore lint/style/useNamingConvention: key matches server enum variant
   MaterialProcessing: (detail) => {
     const d = detail as { totalChunks?: number | null };
     return d.totalChunks != null
@@ -115,9 +114,7 @@ const createPhaseLabelMap = (
         )
       : t('KbChat.phase.materialProcessing', '正在处理材料...');
   },
-  // biome-ignore lint/style/useNamingConvention: key matches server enum variant
   GeneratingAnswer: () => t('KbChat.phase.generatingAnswer', '正在生成回答...'),
-  // biome-ignore lint/style/useNamingConvention: key matches server enum variant
   Persisting: () => t('KbChat.phase.persisting', '正在保存...'),
 });
 
@@ -1118,12 +1115,10 @@ const KbChat = () => {
         const assistant = { ...updated[aIdx], parts: [...updated[aIdx].parts] };
 
         const handleEvent: Record<string, (ev: QaStreamEvent) => void> = {
-          // biome-ignore lint/style/useNamingConvention: key matches SSE event type
           Started: (ev) => {
             const e = ev as { type: 'Started'; data: { sessionId: string } };
             setActiveSessionId(e.data.sessionId);
           },
-          // biome-ignore lint/style/useNamingConvention: key matches SSE event type
           PhaseChanged: (ev) => {
             const e = ev as {
               type: 'PhaseChanged';
@@ -1145,7 +1140,6 @@ const KbChat = () => {
               : phaseType;
             assistant.phase = label;
           },
-          // biome-ignore lint/style/useNamingConvention: key matches SSE event type
           ToolCallStarted: (ev) => {
             const e = ev as {
               type: 'ToolCallStarted';
@@ -1166,7 +1160,6 @@ const KbChat = () => {
               },
             ];
           },
-          // biome-ignore lint/style/useNamingConvention: key matches SSE event type
           ToolCallCompleted: (ev) => {
             const e = ev as {
               type: 'ToolCallCompleted';
@@ -1197,7 +1190,6 @@ const KbChat = () => {
                 : p;
             });
           },
-          // biome-ignore lint/style/useNamingConvention: key matches SSE event type
           AnswerToken: (ev) => {
             const e = ev as {
               type: 'AnswerToken';
@@ -1222,7 +1214,6 @@ const KbChat = () => {
               ];
             }
           },
-          // biome-ignore lint/style/useNamingConvention: key matches SSE event type
           Completed: () => {
             assistant.loading = false;
             setIsStreaming(false);
@@ -1230,7 +1221,6 @@ const KbChat = () => {
             // Refresh sessions list since a new one might have been created
             loadSessions();
           },
-          // biome-ignore lint/style/useNamingConvention: key matches SSE event type
           Error: (ev) => {
             const e = ev as { type: 'Error'; data: { message: string } };
             assistant.loading = false;

@@ -5,13 +5,13 @@ import { BASE_LOCALE, resolveTranslation } from '@/i18n/translate';
 
 // ─── Types ───────────────────────────────────────────────
 
-const I18N_NAMESPACE = 'CommonError';
-const ACTIVE_LOCALE_KEY = 'knota-i18n-active-locale';
+const i18nNamespace = 'CommonError';
+const activeLocaleKey = 'knota-i18n-active-locale';
 
 /** Read the persisted active locale (synchronous — for error translation). */
 const getActiveLocale = (): string => {
   try {
-    const raw = window.localStorage.getItem(ACTIVE_LOCALE_KEY);
+    const raw = window.localStorage.getItem(activeLocaleKey);
     if (raw) {
       const parsed = JSON.parse(raw);
       if (typeof parsed === 'string' && parsed) return parsed;
@@ -32,14 +32,14 @@ const translateErrorCode = (
   fallbackMessage: string,
 ): string => {
   if (!code) return fallbackMessage;
-  const i18nKey = `${I18N_NAMESPACE}.${code}`;
+  const i18nKey = `${i18nNamespace}.${code}`;
   const locale = getActiveLocale();
   const bundles = new Map();
-  const active = getCachedBundle(locale, I18N_NAMESPACE);
-  if (active) bundles.set(`${locale}::${I18N_NAMESPACE}`, active);
+  const active = getCachedBundle(locale, i18nNamespace);
+  if (active) bundles.set(`${locale}::${i18nNamespace}`, active);
   if (locale !== BASE_LOCALE) {
-    const base = getCachedBundle(BASE_LOCALE, I18N_NAMESPACE);
-    if (base) bundles.set(`${BASE_LOCALE}::${I18N_NAMESPACE}`, base);
+    const base = getCachedBundle(BASE_LOCALE, i18nNamespace);
+    if (base) bundles.set(`${BASE_LOCALE}::${i18nNamespace}`, base);
   }
   const resolved = resolveTranslation(
     i18nKey,
@@ -87,20 +87,20 @@ interface RequestOptions extends Omit<RequestInit, 'body'> {
 
 // ─── Constants ───────────────────────────────────────────
 
-const API_BASE_URL = '/api';
-const TOKEN_KEY = 'knota-auth-token';
+const apiBaseUrl = '/api';
+const tokenKey = 'knota-auth-token';
 
 // ─── Helpers ─────────────────────────────────────────────
 
 const getToken = (): string | null => {
-  const raw = localStorage.getItem(TOKEN_KEY);
+  const raw = localStorage.getItem(tokenKey);
   return raw ? JSON.parse(raw) : null;
 };
 
-const clearToken = () => localStorage.removeItem(TOKEN_KEY);
+const clearToken = () => localStorage.removeItem(tokenKey);
 
 const buildUrl = (path: string) =>
-  `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
+  `${apiBaseUrl}${path.startsWith('/') ? path : `/${path}`}`;
 
 /** Append query parameters, skipping undefined / null / empty-string values. */
 const buildUrlWithParams = (path: string, params?: Record<string, unknown>) => {
@@ -341,4 +341,4 @@ export const getBlob = async (url: string): Promise<Blob> => {
   return response.blob();
 };
 
-export { TOKEN_KEY };
+export { tokenKey };

@@ -40,7 +40,7 @@ import {
 import { BASE_LOCALE, resolveTranslation } from './translate';
 import type { CachedBundle, LocaleSummary, TranslateParams } from './types';
 
-const ACTIVE_LOCALE_KEY = 'knota-i18n-active-locale';
+const activeLocaleKey = 'knota-i18n-active-locale';
 
 interface I18nContextValue {
   /** Currently selected locale tag, e.g. `zh-CN`. */
@@ -99,7 +99,7 @@ export const I18nProvider = ({
   const [switching, setSwitching] = useState(false);
   const [storedLocale, setStoredLocale] = useLocalStorageState<
     string | undefined
-  >(ACTIVE_LOCALE_KEY);
+  >(activeLocaleKey);
   const [activeLocale, setActiveLocale] = useState<string>(BASE_LOCALE);
 
   const storeRef = useRef<BundleStoreSnapshot>({

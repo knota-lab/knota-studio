@@ -5,13 +5,13 @@
  * mirrors `client.ts` so the auth contract stays identical.
  */
 
-import { ApiError, TOKEN_KEY } from '@/api/client';
+import { ApiError, tokenKey } from '@/api/client';
 import type { BundleResponse, CachedBundle, LocaleSummary } from './types';
 
 const API_BASE = '/api';
 
 export const readToken = (): string | null => {
-  const raw = window.localStorage.getItem(TOKEN_KEY);
+  const raw = window.localStorage.getItem(tokenKey);
   if (!raw) return null;
   try {
     return JSON.parse(raw) as string;
@@ -32,7 +32,7 @@ const buildHeaders = (extra?: HeadersInit): Headers => {
 
 const handleAuthFailure = (status: number): void => {
   if (status === 401) {
-    window.localStorage.removeItem(TOKEN_KEY);
+    window.localStorage.removeItem(tokenKey);
     if (window.location.pathname !== '/login') {
       window.location.href = '/login';
     }

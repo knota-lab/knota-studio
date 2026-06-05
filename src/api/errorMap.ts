@@ -4,7 +4,7 @@
  * Convention: backend code `"module.detail"` → i18n key `"CommonError.module.detail"`.
  * No explicit mapping needed — the convention is applied automatically.
  *
- * To override a specific code to a different i18n key, add it to `OVERRIDES`.
+ * To override a specific code to a different i18n key, add it to `overrides`.
  */
 
 import type { TFn } from '@/i18n';
@@ -12,9 +12,9 @@ import { ApiError } from './client';
 
 // Override map for codes that don't follow the "CommonError.{code}" convention.
 // Only add entries here when a code needs to map to a DIFFERENT namespace/key.
-const OVERRIDES: Record<string, string> = {};
+const overrides: Record<string, string> = {};
 
-const I18N_NAMESPACE = 'CommonError';
+const i18nNamespace = 'CommonError';
 
 // Resolve an ApiError (or any error) to a localised human-readable message.
 //
@@ -25,6 +25,6 @@ export const getErrorMessage = (error: unknown, t: TFn): string => {
   if (!(error instanceof ApiError) || !error.code) {
     return error instanceof Error ? error.message : String(error);
   }
-  const i18nKey = OVERRIDES[error.code] ?? `${I18N_NAMESPACE}.${error.code}`;
+  const i18nKey = overrides[error.code] ?? `${i18nNamespace}.${error.code}`;
   return t(i18nKey, error.description ?? error.message);
 };

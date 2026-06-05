@@ -36,6 +36,11 @@
                 "selector": { "kind": "variable" },
                 "match": "[a-zA-Z][a-zA-Z0-9]*",
                 "formats": ["camelCase", "PascalCase"]
+              },
+              {
+                "selector": { "kind": "objectLiteralProperty" },
+                "match": "[a-zA-Z][a-zA-Z0-9]*",
+                "formats": ["camelCase"]
               }
             ]
           }
@@ -59,7 +64,6 @@
   "overrides": [
     {
       "includes": [
-        "src/api/**",
         "src/i18n/**",
         "src/stores/**",
         "src/components/form/**",

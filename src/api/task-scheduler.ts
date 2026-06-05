@@ -172,7 +172,7 @@ export const listWorkerExecutions = (params: {
   pageSize: number;
 }) =>
   get<PaginatedResponse<WorkerExecutionResponse>>('/worker-executions', {
-    params: { page: params.page, page_size: params.pageSize },
+    params: { page: params.page, pageSize: params.pageSize },
   });
 
 export const getWorkerExecution = (id: string) =>
