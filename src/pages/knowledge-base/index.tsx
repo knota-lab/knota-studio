@@ -1,6 +1,8 @@
 import { Icon } from '@iconify/react';
+import { useRequest } from 'ahooks';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import { useNavigate } from 'react-router-dom';
 import { DataTablePagination } from '@/components/data-table/pagination';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -45,6 +47,19 @@ const statusVariant = (status: string) => {
   return 'secondary';
 };
 
+const buildKnowledgeScopeLabel = (
+  selectedLibrary: KbLibrary | null,
+  selectedFolder: KbFolder | null,
+) => {
+  if (selectedFolder) {
+    return `知识库范围：${selectedLibrary?.name ?? '当前知识库'} / ${selectedFolder.name}`;
+  }
+  if (selectedLibrary) {
+    return `知识库范围：${selectedLibrary.name}`;
+  }
+  return undefined;
+};
+
 const replaceAssetUrls = (
   markdown: string,
   replacements: Map<string, string>,
@@ -55,6 +70,7 @@ const replaceAssetUrls = (
   );
 
 const KnowledgeBasePage = () => {
+  const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [libraries, setLibraries] = useState<KbLibrary[]>([]);
   const [folders, setFolders] = useState<KbFolder[]>([]);
@@ -62,11 +78,8 @@ const KnowledgeBasePage = () => {
   const [selection, setSelection] = useState<Selection | null>(null);
   const [libraryName, setLibraryName] = useState('');
   const [folderName, setFolderName] = useState('');
-  const [uploading, setUploading] = useState(false);
-  const [loading, setLoading] = useState(false);
   const [preview, setPreview] = useState<DocumentPreview | null>(null);
   const [previewMarkdown, setPreviewMarkdown] = useState('');
-  const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [errorTarget, setErrorTarget] = useState<KbDocument | null>(null);
   const [documentPage, setDocumentPage] = useState(1);
@@ -92,6 +105,11 @@ const KnowledgeBasePage = () => {
   const selectedFolder = useMemo(
     () => folders.find((item) => item.id === selection?.folderId) ?? null,
     [folders, selection?.folderId],
+  );
+
+  const knowledgeScopeLabel = buildKnowledgeScopeLabel(
+    selectedLibrary,
+    selectedFolder,
   );
 
   const loadLibraries = useCallback(async () => {
@@ -132,28 +150,30 @@ const KnowledgeBasePage = () => {
     [documents],
   );
 
-  const loadDocuments = useCallback(
-    async (options?: { silent?: boolean }) => {
+  const { loading, runAsync: loadDocuments } = useRequest(
+    async () => {
       if (!selection) {
-        setDocuments([]);
-        setDocumentTotal(0);
-        return;
+        return null;
       }
-      if (!options?.silent) setLoading(true);
-      try {
-        const data = await listDocuments({
-          page: documentPage,
-          pageSize: documentPageSize,
-          libraryId: selection.libraryId,
-          folderId: selection.folderId,
-        });
+      return listDocuments({
+        page: documentPage,
+        pageSize: documentPageSize,
+        libraryId: selection.libraryId,
+        folderId: selection.folderId,
+      });
+    },
+    {
+      manual: true,
+      onSuccess: (data) => {
+        if (!data) {
+          setDocuments([]);
+          setDocumentTotal(0);
+          return;
+        }
         setDocuments(data.items);
         setDocumentTotal(data.totalItems);
-      } finally {
-        if (!options?.silent) setLoading(false);
-      }
+      },
     },
-    [documentPage, documentPageSize, selection],
   );
 
   useEffect(() => {
@@ -175,7 +195,7 @@ const KnowledgeBasePage = () => {
   useEffect(() => {
     if (!hasIndexingDocuments) return;
     const timer = window.setInterval(() => {
-      void loadDocuments({ silent: true });
+      void loadDocuments();
     }, 3000);
     return () => window.clearInterval(timer);
   }, [hasIndexingDocuments, loadDocuments]);
@@ -211,51 +231,49 @@ const KnowledgeBasePage = () => {
     await loadFolders(selection.libraryId);
   }, [folderName, loadFolders, selection]);
 
-  const handleUpload = useCallback(
-    async (files: FileList | null) => {
-      if (!selection || !files || files.length === 0) return;
-      setUploading(true);
-      try {
-        for (const file of Array.from(files)) {
-          const uploaded = await uploadFile(file, {
-            mimeTypeHint: file.type || undefined,
-          });
-          await createDocument({
-            title: file.name,
-            libraryId: selection.libraryId,
-            folderId: selection.folderId,
-            fileId: uploaded.id,
-            sourceType: file.type || undefined,
-            scope: 'tenant',
-          });
-        }
-        toast.success('已提交入库任务');
-        setDocumentPage(1);
-        if (documentPage === 1) await loadDocuments();
-      } finally {
-        setUploading(false);
-        if (fileInputRef.current) fileInputRef.current.value = '';
+  const { loading: uploading, runAsync: uploadDocuments } = useRequest(
+    async (files: FileList) => {
+      if (!selection) return;
+      for (const file of Array.from(files)) {
+        const uploaded = await uploadFile(file, {
+          mimeTypeHint: file.type || undefined,
+        });
+        await createDocument({
+          title: file.name,
+          libraryId: selection.libraryId,
+          folderId: selection.folderId,
+          fileId: uploaded.id,
+          sourceType: file.type || undefined,
+          scope: 'tenant',
+        });
       }
     },
-    [documentPage, loadDocuments, selection],
+    {
+      manual: true,
+      onSuccess: () => {
+        toast.success('已提交入库任务');
+        setDocumentPage(1);
+        if (documentPage === 1) void loadDocuments();
+      },
+      onFinally: () => {
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      },
+    },
   );
 
-  const handlePreview = useCallback(async (document: KbDocument) => {
-    setPreviewLoading(true);
-    setPreviewError(null);
-    setPreviewMarkdown('');
-    setPreview({
-      documentId: document.id,
-      title: document.title,
-      markdown: '',
-      assets: [],
-    });
-    try {
+  const handleUpload = useCallback(
+    (files: FileList | null) => {
+      if (!selection || !files || files.length === 0) return;
+      void uploadDocuments(files);
+    },
+    [selection, uploadDocuments],
+  );
+
+  const { loading: previewLoading, runAsync: previewDocument } = useRequest(
+    async (document: KbDocument) => {
       const data = await getDocumentPreview(document.id);
-      setPreview(data);
       if (data.assets.length === 0) {
-        setPreviewMarkdown(data.markdown);
-        return;
+        return { data, markdown: data.markdown };
       }
       const signed = await presignDocumentAssets(
         document.id,
@@ -264,14 +282,40 @@ const KnowledgeBasePage = () => {
       const replacements = new Map(
         signed.items.map((item) => [item.assetKey, item.url]),
       );
-      setPreviewMarkdown(replaceAssetUrls(data.markdown, replacements));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setPreviewError(message);
-    } finally {
-      setPreviewLoading(false);
-    }
-  }, []);
+      return {
+        data,
+        markdown: replaceAssetUrls(data.markdown, replacements),
+      };
+    },
+    {
+      manual: true,
+      onBefore: ([document]) => {
+        setPreviewError(null);
+        setPreviewMarkdown('');
+        setPreview({
+          documentId: document.id,
+          title: document.title,
+          markdown: '',
+          assets: [],
+        });
+      },
+      onSuccess: ({ data, markdown }) => {
+        setPreview(data);
+        setPreviewMarkdown(markdown);
+      },
+      onError: (error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        setPreviewError(message);
+      },
+    },
+  );
+
+  const handlePreview = useCallback(
+    (document: KbDocument) => {
+      void previewDocument(document);
+    },
+    [previewDocument],
+  );
 
   const handleDeleteDocument = useCallback(
     async (document: KbDocument) => {
@@ -441,6 +485,27 @@ const KnowledgeBasePage = () => {
                     }
                   />
                   {hasIndexingDocuments ? '刷新中' : '刷新'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={!selection || !knowledgeScopeLabel}
+                  onClick={() => {
+                    if (!selection || !knowledgeScopeLabel) return;
+                    navigate('/chat', {
+                      state: {
+                        kbScope: {
+                          libraryId: selection.libraryId,
+                          folderId: selection.folderId,
+                          label: knowledgeScopeLabel,
+                        },
+                      },
+                    });
+                  }}
+                >
+                  <Icon icon="lucide:message-circle" className="mr-2 size-4" />
+                  按当前范围提问
                 </Button>
                 <Button
                   type="button"

@@ -4,10 +4,15 @@ import dayjs from 'dayjs';
 import type { ChangeEvent } from 'react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
 import { smallUpload } from '@/api/files';
-import type { ChatSession, QaPhase, QaStreamEvent } from '@/api/knowledge-base';
+import type {
+  ChatSession,
+  ChatSessionDetail,
+  QaPhase,
+  QaStreamEvent,
+} from '@/api/knowledge-base';
 import {
   askQuestionStream,
   debugExportSession,
@@ -60,9 +65,10 @@ interface UiMessage {
   parts: ContentPart[];
   loading: boolean;
   hasMaterial: boolean;
-  materialType: 'file' | 'inline' | undefined;
+  materialType: 'file' | 'inline' | 'knowledge' | undefined;
   fileName: string | undefined;
   inlineText: string | undefined;
+  knowledgeScopeLabel: string | undefined;
   phase: string | undefined;
   fileIds: string[];
   fileNames: string[];
@@ -72,6 +78,12 @@ interface UiMessage {
 interface AttachedFile {
   id: string;
   name: string;
+}
+
+interface KnowledgeScope {
+  libraryId?: string;
+  folderId?: string;
+  label: string;
 }
 
 // ─── Constants ──────────────────────────────────────────
@@ -124,6 +136,28 @@ const remarkPlugins = [remarkGfm];
 
 let messageKeyCounter = 0;
 const nextMsgKey = () => `msg-${++messageKeyCounter}-${Date.now()}`;
+
+const buildKnowledgeScopeLabel = (
+  refs: ChatSessionDetail['messages'][number]['materialRefs'],
+  t: TFn,
+) => {
+  if (refs?.folderId) {
+    return t('KbChat.material.folderScope', '知识库目录范围');
+  }
+  if (refs?.libraryId) {
+    return t('KbChat.material.libraryScope', '知识库范围');
+  }
+  return undefined;
+};
+
+const resolveMaterialType = (
+  inlineRef: unknown,
+  scopeLabel: string | undefined,
+): UiMessage['materialType'] => {
+  if (inlineRef) return 'inline';
+  if (scopeLabel) return 'knowledge';
+  return undefined;
+};
 
 // ─── Helper: download blob ──────────────────────────────
 
@@ -355,6 +389,12 @@ const UserMessage = memo(
                 <span className="text-xs font-medium truncate">{name}</span>
               </div>
             ))}
+          </div>
+        )}
+        {msg.knowledgeScopeLabel && (
+          <div className="flex items-center gap-2 rounded-md border border-white/15 bg-white/10 px-3 py-1.5 text-xs font-medium">
+            <Icon icon="lucide:library" className="size-3.5" />
+            <span className="truncate">{msg.knowledgeScopeLabel}</span>
           </div>
         )}
         <span>{msg.content}</span>
@@ -599,6 +639,7 @@ const KbChat = () => {
   const [isStreaming, setIsStreaming] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [inlineText, setInlineText] = useState<string | undefined>();
+  const [knowledgeScope, setKnowledgeScope] = useState<KnowledgeScope>();
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | undefined>();
 
   const abortRef = useRef<AbortController | null>(null);
@@ -610,7 +651,15 @@ const KbChat = () => {
   const scrollToMsgKeyRef = useRef<string | null>(null);
 
   const navigate = useNavigate();
+  const location = useLocation();
   const { data: menuTree } = useRequest(getUserMenus, { manual: false });
+
+  useEffect(() => {
+    const state = location.state as { kbScope?: KnowledgeScope } | null;
+    if (state?.kbScope) {
+      setKnowledgeScope(state.kbScope);
+    }
+  }, [location.state]);
 
   // --- Sessions loading ---
   const { loading: sessionsLoading, run: loadSessions } = useRequest(
@@ -656,7 +705,8 @@ const KbChat = () => {
 
           // Restore material refs
           const inlineRef = m.materialRefs?.inline;
-          const materialType = inlineRef ? ('inline' as const) : undefined;
+          const scopeLabel = buildKnowledgeScopeLabel(m.materialRefs, t);
+          const materialType = resolveMaterialType(inlineRef, scopeLabel);
           const inlineText = inlineRef?.content;
 
           return {
@@ -669,6 +719,7 @@ const KbChat = () => {
             materialType,
             fileName: undefined,
             inlineText,
+            knowledgeScopeLabel: scopeLabel,
             phase: undefined,
             fileIds: [],
             fileNames: [],
@@ -917,6 +968,8 @@ const KbChat = () => {
       materialType = 'inline';
     } else if (attachedFiles.length > 0) {
       materialType = 'file';
+    } else if (knowledgeScope) {
+      materialType = 'knowledge';
     }
 
     const userMsg: UiMessage = {
@@ -925,10 +978,11 @@ const KbChat = () => {
       content: text,
       parts: [],
       loading: false,
-      hasMaterial: attachedFiles.length > 0 || !!inlineText,
+      hasMaterial: attachedFiles.length > 0 || !!inlineText || !!knowledgeScope,
       materialType,
       fileName: undefined,
       inlineText,
+      knowledgeScopeLabel: knowledgeScope?.label,
       phase: undefined,
       fileIds: attachedFiles.map((f) => f.id),
       fileNames: attachedFiles.map((f) => f.name),
@@ -951,6 +1005,7 @@ const KbChat = () => {
         materialType: undefined,
         fileName: undefined,
         inlineText: undefined,
+        knowledgeScopeLabel: undefined,
         phase: undefined,
         fileIds: [],
         fileNames: [],
@@ -969,9 +1024,11 @@ const KbChat = () => {
 
     // Build request
     const material =
-      inlineText || attachedFiles.length > 0
+      inlineText || attachedFiles.length > 0 || knowledgeScope
         ? {
             inline: inlineText,
+            libraryId: knowledgeScope?.libraryId,
+            folderId: knowledgeScope?.folderId,
             fileIds:
               attachedFiles.length > 0
                 ? attachedFiles.map((f) => f.id)
@@ -990,6 +1047,8 @@ const KbChat = () => {
       instruction: string;
       material?: {
         inline?: string;
+        libraryId?: string;
+        folderId?: string;
         fileIds?: string[];
       };
       sessionId?: string;
@@ -1267,6 +1326,7 @@ const KbChat = () => {
     isStreaming,
     attachedFiles,
     inlineText,
+    knowledgeScope,
     activeSessionId,
     loadSessions,
     t,
@@ -1457,7 +1517,7 @@ const KbChat = () => {
       {/* ─── Input area ─── */}
       <div className="shrink-0 px-5 py-4 bg-card border-t">
         {/* Material indicators */}
-        {(attachedFiles.length > 0 || inlineText) && (
+        {(attachedFiles.length > 0 || inlineText || knowledgeScope) && (
           <div className="flex flex-wrap gap-1.5 mb-2">
             {attachedFiles.map((f) => (
               <span
@@ -1484,6 +1544,19 @@ const KbChat = () => {
                   type="button"
                   className="grid place-items-center text-blue-500 hover:text-blue-700 dark:hover:text-blue-300 bg-transparent border-none cursor-pointer p-0"
                   onClick={handleRemoveInlineText}
+                >
+                  <Icon icon="lucide:x" className="size-3" />
+                </button>
+              </span>
+            )}
+            {knowledgeScope && (
+              <span className="file-chip-blue inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-purple-200 bg-purple-50 text-xs font-medium text-purple-700 dark:border-purple-800 dark:bg-purple-900/30 dark:text-purple-300">
+                <Icon icon="lucide:library" className="size-3" />
+                {knowledgeScope.label}
+                <button
+                  type="button"
+                  className="grid place-items-center border-none bg-transparent p-0 text-purple-500 cursor-pointer hover:text-purple-700 dark:hover:text-purple-200"
+                  onClick={() => setKnowledgeScope(undefined)}
                 >
                   <Icon icon="lucide:x" className="size-3" />
                 </button>

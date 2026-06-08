@@ -8,6 +8,8 @@ export interface QaRequest {
   instruction: string;
   material?: {
     inline?: string;
+    libraryId?: string;
+    folderId?: string;
     documentIds?: string[];
     fileIds?: string[];
   };
@@ -325,7 +327,13 @@ export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
-  materialRefs?: { inline?: MaterialRefInline } | null;
+  materialRefs?: {
+    inline?: MaterialRefInline;
+    libraryId?: string;
+    folderId?: string;
+    documentIds?: string[];
+    fileIds?: string[];
+  } | null;
   tokenUsage?: TokenUsage | null;
   createdAt: string;
 }
