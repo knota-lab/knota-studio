@@ -190,6 +190,7 @@ const KnowledgeBasePage = () => {
             libraryId: selection.libraryId,
             folderId: selection.folderId,
             fileId: uploaded.id,
+            sourceType: file.type || undefined,
             scope: 'tenant',
           });
         }

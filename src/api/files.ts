@@ -102,6 +102,14 @@ export interface ProbeRequest {
   mimeTypeHint?: string;
 }
 
+export interface AttachReferenceRequest {
+  resourceType: string;
+  resourceId: string;
+  fieldName?: string;
+  displayName?: string;
+  mimeType?: string;
+}
+
 export interface ProbeUploadHint {
   endpoint: string;
   partSize: number;
@@ -149,6 +157,7 @@ export interface InstantUploadRequest {
   /** 后端 DTO 字段名: `expected_hash_fast` (前缀 `b3fast:` + 64 hex)。 */
   expectedHashFast: string;
   mimeTypeHint?: string;
+  attachTo?: AttachReferenceRequest;
 }
 
 export interface InstantUploadConfirmed {
@@ -185,6 +194,10 @@ export interface InitiateUploadRequest {
   partSize: number;
   expectedHashFast?: string;
   mimeTypeHint?: string;
+}
+
+export interface CompleteUploadRequest {
+  attachTo?: AttachReferenceRequest;
 }
 
 export interface InitiateUploadResponse {
@@ -394,12 +407,13 @@ export const registerPart = (
 
 export const completeUpload = (
   uploadId: string,
+  data: CompleteUploadRequest = {},
   sys?: SysScope,
   idempotencyKey?: string,
 ) =>
   post<CompleteUploadResponse>(
     `${scopePaths(sys).uploads}/${uploadId}/complete`,
-    {},
+    data,
     { headers: idemHeader(idempotencyKey ?? newIdempotencyKey()) },
   );
 
@@ -417,10 +431,31 @@ export const abortUpload = (
 export const smallUpload = (
   file: File,
   sys?: SysScope,
+  attachTo?: AttachReferenceRequest,
+  mimeTypeHint?: string,
 ): Promise<FileResponse> => {
   const form = new FormData();
   form.append('file', file, file.name);
+  if (mimeTypeHint) {
+    form.append('mimeTypeHint', mimeTypeHint);
+  }
+  if (attachTo) {
+    form.append('attachTo', JSON.stringify(attachTo));
+  }
   return postMultipart<FileResponse>(scopePaths(sys).files, form);
+};
+
+const buildUploadAttachTo = (
+  file: File,
+  attachTo: AttachReferenceRequest | undefined,
+  mimeTypeHint: string | undefined,
+): AttachReferenceRequest | undefined => {
+  if (!attachTo) return undefined;
+  return {
+    ...attachTo,
+    displayName: attachTo.displayName ?? file.name,
+    mimeType: attachTo.mimeType ?? mimeTypeHint,
+  };
 };
 
 // ---------- Hash 计算 (blake3 via hash-wasm) ----------
@@ -665,14 +700,17 @@ export const uploadFile = async (
     onUploadProgress?: (progress: UploadProgress) => void;
     onInstantConfirmed?: (revived: boolean) => void;
     mimeTypeHint?: string;
+    attachTo?: AttachReferenceRequest;
   },
 ): Promise<FileResponse> => {
   const sys = options?.sys;
+  const mimeTypeHint = (options?.mimeTypeHint ?? file.type) || undefined;
+  const attachTo = buildUploadAttachTo(file, options?.attachTo, mimeTypeHint);
 
   // 1) ≤5 MiB: 跳过 hash, 直接 small upload (后端会自己算 hash)。
   if (file.size <= smallUploadLimit) {
     options?.onPhaseChange?.('small-uploading');
-    return smallUpload(file, sys);
+    return smallUpload(file, sys, attachTo, mimeTypeHint);
   }
 
   // 2) ≥32 MiB: 先算 fast-hash 做 probe；Suspect 则走客户端秒传确认。
@@ -686,9 +724,7 @@ export const uploadFile = async (
         fileName: file.name,
         fileSize: file.size,
         contentHashFast: fastHash,
-        ...(options?.mimeTypeHint
-          ? { mimeTypeHint: options.mimeTypeHint }
-          : {}),
+        ...(mimeTypeHint ? { mimeTypeHint } : {}),
       },
       sys,
     );
@@ -706,9 +742,8 @@ export const uploadFile = async (
           expectedHash: fullHash,
           expectedHashAlgo: 'b3',
           expectedHashFast: fastHash,
-          ...(options?.mimeTypeHint
-            ? { mimeTypeHint: options.mimeTypeHint }
-            : {}),
+          ...(mimeTypeHint ? { mimeTypeHint } : {}),
+          ...(attachTo ? { attachTo } : {}),
         },
         sys,
         instantId,
@@ -729,7 +764,7 @@ export const uploadFile = async (
       expectedHashAlgo: 'b3',
       partSize: defaultPartSize,
       ...(fastHash ? { expectedHashFast: fastHash } : {}),
-      ...(options?.mimeTypeHint ? { mimeTypeHint: options.mimeTypeHint } : {}),
+      ...(mimeTypeHint ? { mimeTypeHint } : {}),
     },
     sys,
   );
@@ -803,7 +838,11 @@ export const uploadFile = async (
 
     // 6) complete (服务端流式重算 hash + size + MIME, 权威定终态)。
     options?.onPhaseChange?.('completing');
-    const completed = await completeUpload(uploadId, sys);
+    const completed = await completeUpload(
+      uploadId,
+      attachTo ? { attachTo } : {},
+      sys,
+    );
 
     return await getFile(completed.file.id, sys);
   } catch (err) {
