@@ -7,6 +7,7 @@ import { del, fetchSSE, get, getBlob, post, put } from './client';
 export interface QaRequest {
   instruction: string;
   material?: {
+    useKnowledgeBase?: boolean;
     inline?: string;
     libraryId?: string;
     folderId?: string;

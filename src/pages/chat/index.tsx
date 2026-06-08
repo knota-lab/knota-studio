@@ -18,6 +18,11 @@ import {
 } from '@/api/knowledge-base';
 import { getUserMenus } from '@/api/menu';
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -56,6 +61,7 @@ import {
   inlineTextThreshold,
   loadLibraryFolders,
   nextMsgKey,
+  noKnowledgeScopeValue,
   resolveMaterialType,
   wholeLibraryFolderValue,
 } from './helpers';
@@ -84,6 +90,7 @@ const KbChat = () => {
   const [isStreaming, setIsStreaming] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [inlineText, setInlineText] = useState<string | undefined>();
+  const [knowledgeBaseEnabled, setKnowledgeBaseEnabled] = useState(false);
   const [selectedLibraryId, setSelectedLibraryId] = useState<string>();
   const [selectedFolderId, setSelectedFolderId] = useState<string>();
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | undefined>();
@@ -280,7 +287,12 @@ const KbChat = () => {
   );
 
   const knowledgeScope = useMemo<KnowledgeScope | undefined>(() => {
-    if (!selectedLibrary) return undefined;
+    if (!knowledgeBaseEnabled) return undefined;
+    if (!selectedLibrary) {
+      return {
+        label: '知识库范围：全部知识库',
+      };
+    }
     if (selectedFolder) {
       return {
         libraryId: selectedLibrary.id,
@@ -292,7 +304,15 @@ const KbChat = () => {
       libraryId: selectedLibrary.id,
       label: `知识库范围：${selectedLibrary.name}`,
     };
-  }, [selectedFolder, selectedLibrary]);
+  }, [knowledgeBaseEnabled, selectedFolder, selectedLibrary]);
+
+  const knowledgeScopeDisplay = useMemo(() => {
+    if (!knowledgeBaseEnabled) return '不使用知识库';
+    if (!selectedLibrary) return '全部知识库';
+    if (selectedFolder)
+      return `${selectedLibrary.name} / ${selectedFolder.name}`;
+    return selectedLibrary.name;
+  }, [knowledgeBaseEnabled, selectedFolder, selectedLibrary]);
 
   const sessionMeta = useMemo(() => {
     if (!activeSession) return '';
@@ -467,7 +487,7 @@ const KbChat = () => {
       materialType = 'inline';
     } else if (attachedFiles.length > 0) {
       materialType = 'file';
-    } else if (knowledgeScope) {
+    } else if (knowledgeBaseEnabled) {
       materialType = 'knowledge';
     }
 
@@ -477,7 +497,8 @@ const KbChat = () => {
       content: text,
       parts: [],
       loading: false,
-      hasMaterial: attachedFiles.length > 0 || !!inlineText || !!knowledgeScope,
+      hasMaterial:
+        attachedFiles.length > 0 || !!inlineText || knowledgeBaseEnabled,
       materialType,
       fileName: undefined,
       inlineText,
@@ -522,18 +543,14 @@ const KbChat = () => {
     }
 
     // Build request
-    const material =
-      inlineText || attachedFiles.length > 0 || knowledgeScope
-        ? {
-            inline: inlineText,
-            libraryId: knowledgeScope?.libraryId,
-            folderId: knowledgeScope?.folderId,
-            fileIds:
-              attachedFiles.length > 0
-                ? attachedFiles.map((f) => f.id)
-                : undefined,
-          }
-        : undefined;
+    const material = {
+      useKnowledgeBase: knowledgeBaseEnabled,
+      inline: inlineText,
+      libraryId: knowledgeScope?.libraryId,
+      folderId: knowledgeScope?.folderId,
+      fileIds:
+        attachedFiles.length > 0 ? attachedFiles.map((f) => f.id) : undefined,
+    };
 
     const abort = new AbortController();
     abortRef.current = abort;
@@ -546,6 +563,7 @@ const KbChat = () => {
       instruction: string;
       material?: {
         inline?: string;
+        useKnowledgeBase?: boolean;
         libraryId?: string;
         folderId?: string;
         fileIds?: string[];
@@ -833,6 +851,7 @@ const KbChat = () => {
     isStreaming,
     attachedFiles,
     inlineText,
+    knowledgeBaseEnabled,
     knowledgeScope,
     setActiveSession,
     loadSessions,
@@ -1023,67 +1042,154 @@ const KbChat = () => {
 
       {/* ─── Input area ─── */}
       <div className="shrink-0 px-5 py-4 bg-card border-t">
-        <div className="mb-2 flex flex-wrap items-center gap-2">
-          <Select
-            value={selectedLibraryId ?? allKnowledgeScopeValue}
-            onValueChange={(value) => {
-              setSelectedFolderId(undefined);
-              setSelectedLibraryId(
-                value === allKnowledgeScopeValue ? undefined : value,
-              );
-            }}
-          >
-            <SelectTrigger className="h-8 w-52 bg-background text-xs">
-              <SelectValue placeholder="全部知识库" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={allKnowledgeScopeValue}>全部知识库</SelectItem>
-              {libraries.map((library) => (
-                <SelectItem key={library.id} value={library.id}>
-                  {library.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          {selectedLibraryId && (
-            <Select
-              value={selectedFolderId ?? wholeLibraryFolderValue}
-              onValueChange={(value) => {
-                setSelectedFolderId(
-                  value === wholeLibraryFolderValue ? undefined : value,
-                );
-              }}
+        <div className="mb-2 flex items-center">
+          <Popover>
+            <div
+              className={cn(
+                'inline-flex max-w-full items-center overflow-hidden rounded-full border text-xs font-medium transition-colors',
+                knowledgeBaseEnabled
+                  ? 'border-purple-200 bg-purple-50 text-purple-700 dark:border-purple-800 dark:bg-purple-900/30 dark:text-purple-200'
+                  : 'border-border bg-muted text-muted-foreground',
+              )}
             >
-              <SelectTrigger className="h-8 w-56 bg-background text-xs">
-                <SelectValue placeholder="整库" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={wholeLibraryFolderValue}>
-                  整个知识库
-                </SelectItem>
-                {scopeFolders.map((folder) => (
-                  <SelectItem key={folder.id} value={folder.id}>
-                    {'  '.repeat(folder.depth)}
-                    {folder.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className={cn(
+                    'inline-flex min-w-0 items-center gap-1.5 px-2.5 py-1 transition-colors',
+                    knowledgeBaseEnabled
+                      ? 'hover:bg-purple-100 hover:text-purple-800 dark:hover:bg-purple-900/50 dark:hover:text-purple-100'
+                      : 'hover:bg-accent hover:text-foreground',
+                  )}
+                >
+                  <Icon icon="lucide:library" className="size-3.5 shrink-0" />
+                  <span className="truncate">{knowledgeScopeDisplay}</span>
+                  {!knowledgeBaseEnabled && (
+                    <Icon
+                      icon="lucide:chevron-down"
+                      className="size-3 shrink-0 opacity-60"
+                    />
+                  )}
+                </button>
+              </PopoverTrigger>
+              {knowledgeBaseEnabled && (
+                <button
+                  type="button"
+                  title="不使用知识库"
+                  aria-label="清除知识库范围"
+                  className="grid size-6 shrink-0 place-items-center border-l border-purple-200/80 text-purple-500 transition-colors hover:bg-purple-100 hover:text-purple-800 dark:border-purple-800 dark:text-purple-200 dark:hover:bg-purple-900/50 dark:hover:text-purple-100"
+                  onClick={() => {
+                    setKnowledgeBaseEnabled(false);
+                    setSelectedLibraryId(undefined);
+                    setSelectedFolderId(undefined);
+                  }}
+                >
+                  <Icon icon="lucide:x" className="size-3.5" />
+                </button>
+              )}
+            </div>
+            <PopoverContent align="start" className="w-80 p-3">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-xs font-medium text-foreground">
+                      知识库范围
+                    </div>
+                    <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                      {knowledgeScopeDisplay}
+                    </div>
+                  </div>
+                  {knowledgeBaseEnabled && (
+                    <button
+                      type="button"
+                      className="shrink-0 rounded-md border border-border bg-transparent px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                      onClick={() => {
+                        setKnowledgeBaseEnabled(false);
+                        setSelectedLibraryId(undefined);
+                        setSelectedFolderId(undefined);
+                      }}
+                    >
+                      不使用
+                    </button>
+                  )}
+                </div>
 
-          <span className="text-xs text-muted-foreground">
-            {knowledgeScope?.label ?? '知识库范围：全部可见文档'}
-          </span>
+                <Select
+                  value={
+                    knowledgeBaseEnabled
+                      ? (selectedLibraryId ?? allKnowledgeScopeValue)
+                      : noKnowledgeScopeValue
+                  }
+                  onValueChange={(value) => {
+                    setSelectedFolderId(undefined);
+                    if (value === noKnowledgeScopeValue) {
+                      setKnowledgeBaseEnabled(false);
+                      setSelectedLibraryId(undefined);
+                      return;
+                    }
+                    setKnowledgeBaseEnabled(true);
+                    setSelectedLibraryId(
+                      value === allKnowledgeScopeValue ? undefined : value,
+                    );
+                  }}
+                >
+                  <SelectTrigger className="h-8 bg-background text-xs">
+                    <SelectValue placeholder="不使用知识库" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={noKnowledgeScopeValue}>
+                      不使用知识库
+                    </SelectItem>
+                    <SelectItem value={allKnowledgeScopeValue}>
+                      全部知识库
+                    </SelectItem>
+                    {libraries.map((library) => (
+                      <SelectItem key={library.id} value={library.id}>
+                        {library.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                {knowledgeBaseEnabled && selectedLibraryId && (
+                  <Select
+                    value={selectedFolderId ?? wholeLibraryFolderValue}
+                    onValueChange={(value) => {
+                      setSelectedFolderId(
+                        value === wholeLibraryFolderValue ? undefined : value,
+                      );
+                    }}
+                  >
+                    <SelectTrigger className="h-8 bg-background text-xs">
+                      <SelectValue placeholder="整个知识库" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={wholeLibraryFolderValue}>
+                        整个知识库
+                      </SelectItem>
+                      {scopeFolders.map((folder) => (
+                        <SelectItem key={folder.id} value={folder.id}>
+                          {'  '.repeat(folder.depth)}
+                          {folder.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+            </PopoverContent>
+          </Popover>
         </div>
 
         {/* Material indicators */}
-        {(attachedFiles.length > 0 || inlineText || knowledgeScope) && (
+        {(attachedFiles.length > 0 || inlineText) && (
           <div className="flex flex-wrap gap-1.5 mb-2">
             {attachedFiles.map((f) => (
               <span
                 key={f.id}
-                className="file-chip-emerald inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800"
+                className={cn(
+                  'file-chip-emerald inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800',
+                )}
               >
                 <Icon icon="lucide:paperclip" className="size-3" />
                 {f.name}
@@ -1105,22 +1211,6 @@ const KbChat = () => {
                   type="button"
                   className="grid place-items-center text-blue-500 hover:text-blue-700 dark:hover:text-blue-300 bg-transparent border-none cursor-pointer p-0"
                   onClick={handleRemoveInlineText}
-                >
-                  <Icon icon="lucide:x" className="size-3" />
-                </button>
-              </span>
-            )}
-            {knowledgeScope && (
-              <span className="file-chip-blue inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-purple-200 bg-purple-50 text-xs font-medium text-purple-700 dark:border-purple-800 dark:bg-purple-900/30 dark:text-purple-300">
-                <Icon icon="lucide:library" className="size-3" />
-                {knowledgeScope.label}
-                <button
-                  type="button"
-                  className="grid place-items-center border-none bg-transparent p-0 text-purple-500 cursor-pointer hover:text-purple-700 dark:hover:text-purple-200"
-                  onClick={() => {
-                    setSelectedLibraryId(undefined);
-                    setSelectedFolderId(undefined);
-                  }}
                 >
                   <Icon icon="lucide:x" className="size-3" />
                 </button>

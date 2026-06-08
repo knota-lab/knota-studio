@@ -6,6 +6,7 @@ import type { TFn } from '@/i18n';
 import type { MaterialRefs, UiMessage } from './types';
 
 export const allKnowledgeScopeValue = '__all__';
+export const noKnowledgeScopeValue = '__none__';
 export const wholeLibraryFolderValue = '__whole_library__';
 export const inlineTextThreshold = 1500;
 export const remarkPlugins = [remarkGfm];
