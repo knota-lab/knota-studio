@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
+import { cn } from '@/lib/utils';
 import { toast } from '@/utils/toast';
 import {
   createDocument,
@@ -46,6 +47,46 @@ const statusVariant = (status: string) => {
   return 'secondary';
 };
 
+const statusMeta = (status: string) => {
+  switch (status) {
+    case 'pending':
+      return {
+        icon: 'lucide:clock-3',
+        label: '等待入库',
+        description: '任务已创建，等待 worker 处理',
+        tone: 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-300',
+      };
+    case 'indexing':
+      return {
+        icon: 'lucide:loader-2',
+        label: '入库中',
+        description: '正在解析、切分并写入向量索引',
+        tone: 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
+      };
+    case 'ready':
+      return {
+        icon: 'lucide:check-circle-2',
+        label: '可用',
+        description: '文档已完成索引，可以检索和预览',
+        tone: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300',
+      };
+    case 'error':
+      return {
+        icon: 'lucide:circle-alert',
+        label: '失败',
+        description: '入库失败，查看错误后可重新入库',
+        tone: 'border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-900/30 dark:text-red-300',
+      };
+    default:
+      return {
+        icon: 'lucide:circle-help',
+        label: status,
+        description: '未知状态',
+        tone: 'border-border bg-muted/40 text-muted-foreground',
+      };
+  }
+};
+
 const replaceAssetUrls = (
   markdown: string,
   replacements: Map<string, string>,
@@ -70,6 +111,9 @@ const KnowledgeBasePage = () => {
   const [documentPage, setDocumentPage] = useState(1);
   const [documentPageSize, setDocumentPageSize] = useState(30);
   const [documentTotal, setDocumentTotal] = useState(0);
+  const [reindexingIds, setReindexingIds] = useState<Set<string>>(
+    () => new Set(),
+  );
 
   const folderChildren = useMemo(() => {
     const map = new Map<string, KbFolder[]>();
@@ -129,6 +173,23 @@ const KnowledgeBasePage = () => {
       ),
     [documents],
   );
+
+  const documentStats = useMemo(() => {
+    const stats = {
+      total: documents.length,
+      pending: 0,
+      indexing: 0,
+      ready: 0,
+      error: 0,
+    };
+    for (const document of documents) {
+      if (document.status === 'pending') stats.pending += 1;
+      if (document.status === 'indexing') stats.indexing += 1;
+      if (document.status === 'ready') stats.ready += 1;
+      if (document.status === 'error') stats.error += 1;
+    }
+    return stats;
+  }, [documents]);
 
   const { loading, runAsync: loadDocuments } = useRequest(
     async () => {
@@ -308,9 +369,18 @@ const KnowledgeBasePage = () => {
 
   const handleReindex = useCallback(
     async (document: KbDocument) => {
-      await reindexDocument(document.id);
-      toast.success('已提交重建索引');
-      await loadDocuments();
+      setReindexingIds((current) => new Set(current).add(document.id));
+      try {
+        await reindexDocument(document.id);
+        toast.success('已提交重新入库');
+        await loadDocuments();
+      } finally {
+        setReindexingIds((current) => {
+          const next = new Set(current);
+          next.delete(document.id);
+          return next;
+        });
+      }
     },
     [loadDocuments],
   );
@@ -486,84 +556,193 @@ const KnowledgeBasePage = () => {
             </CardTitle>
           </CardHeader>
           <CardContent>
+            <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <span className="inline-flex items-center gap-1 rounded-md border bg-muted/40 px-2 py-1">
+                <Icon icon="lucide:files" className="size-3.5" />
+                当前页 {documentStats.total} 个
+              </span>
+              <span
+                className={cn(
+                  'inline-flex items-center gap-1 rounded-md border px-2 py-1',
+                  statusMeta('pending').tone,
+                )}
+              >
+                <Icon icon="lucide:clock-3" className="size-3.5" />
+                等待 {documentStats.pending}
+              </span>
+              <span
+                className={cn(
+                  'inline-flex items-center gap-1 rounded-md border px-2 py-1',
+                  statusMeta('indexing').tone,
+                )}
+              >
+                <Icon
+                  icon="lucide:loader-2"
+                  className={cn(
+                    'size-3.5',
+                    hasIndexingDocuments && 'animate-spin',
+                  )}
+                />
+                入库中 {documentStats.indexing}
+              </span>
+              <span
+                className={cn(
+                  'inline-flex items-center gap-1 rounded-md border px-2 py-1',
+                  statusMeta('ready').tone,
+                )}
+              >
+                <Icon icon="lucide:check-circle-2" className="size-3.5" />
+                可用 {documentStats.ready}
+              </span>
+              <span
+                className={cn(
+                  'inline-flex items-center gap-1 rounded-md border px-2 py-1',
+                  statusMeta('error').tone,
+                )}
+              >
+                <Icon icon="lucide:circle-alert" className="size-3.5" />
+                失败 {documentStats.error}
+              </span>
+              {hasIndexingDocuments && (
+                <span className="text-[11px]">
+                  检测到入库任务，页面会自动刷新状态
+                </span>
+              )}
+            </div>
             <div className="overflow-hidden rounded-md border">
               <table className="w-full table-fixed text-sm">
                 <thead className="bg-muted/60 text-left">
                   <tr>
                     <th className="w-[36%] px-3 py-2 font-medium">文档</th>
-                    <th className="w-28 px-3 py-2 font-medium">状态</th>
+                    <th className="w-28 px-3 py-2 text-center font-medium">
+                      状态
+                    </th>
                     <th className="w-28 px-3 py-2 font-medium">分块</th>
-                    <th className="w-44 px-3 py-2 font-medium">更新时间</th>
-                    <th className="w-72 px-3 py-2 text-right font-medium">
+                    <th className="w-44 px-3 py-2 text-center font-medium">
+                      更新时间
+                    </th>
+                    <th className="w-72 px-3 py-2 text-center font-medium">
                       操作
                     </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {documents.map((document) => (
-                    <tr key={document.id} className="border-t">
-                      <td className="min-w-0 px-3 py-2">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <Icon
-                            icon="lucide:file-text"
-                            className="size-4 shrink-0 text-muted-foreground"
-                          />
-                          <div className="min-w-0">
-                            <div className="truncate font-medium">
-                              {document.title}
+                  {documents.map((document) => {
+                    const meta = statusMeta(document.status);
+                    const isProcessing = ['pending', 'indexing'].includes(
+                      document.status,
+                    );
+                    const isReindexing = reindexingIds.has(document.id);
+                    return (
+                      <tr key={document.id} className="border-t">
+                        <td className="min-w-0 px-3 py-2">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <Icon
+                              icon="lucide:file-text"
+                              className="size-4 shrink-0 text-muted-foreground"
+                            />
+                            <div className="min-w-0">
+                              <div className="truncate font-medium">
+                                {document.title}
+                              </div>
+                              <div className="mt-0.5 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+                                <span className="truncate">
+                                  {meta.description}
+                                </span>
+                                {document.errorMessage && (
+                                  <button
+                                    type="button"
+                                    className="shrink-0 text-destructive underline-offset-2 hover:underline"
+                                    onClick={() => setErrorTarget(document)}
+                                  >
+                                    查看错误
+                                  </button>
+                                )}
+                              </div>
                             </div>
-                            {document.errorMessage && (
-                              <button
-                                type="button"
-                                className="block max-w-full truncate text-left text-xs text-destructive underline-offset-2 hover:underline"
-                                onClick={() => setErrorTarget(document)}
-                              >
-                                {document.errorMessage}
-                              </button>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <Badge
+                            variant={statusVariant(document.status)}
+                            className={cn('border', meta.tone)}
+                          >
+                            <span className="inline-flex items-center gap-1">
+                              <Icon
+                                icon={meta.icon}
+                                className={cn(
+                                  'size-3',
+                                  document.status === 'indexing' &&
+                                    'animate-spin',
+                                )}
+                              />
+                              {meta.label}
+                            </span>
+                          </Badge>
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="leading-tight">
+                            <div>{document.chunkCount}</div>
+                            {document.totalTokens > 0 && (
+                              <div className="text-[11px] text-muted-foreground">
+                                {document.totalTokens} tokens
+                              </div>
                             )}
                           </div>
-                        </div>
-                      </td>
-                      <td className="px-3 py-2">
-                        <Badge variant={statusVariant(document.status)}>
-                          {document.status}
-                        </Badge>
-                      </td>
-                      <td className="px-3 py-2">{document.chunkCount}</td>
-                      <td className="px-3 py-2 text-muted-foreground">
-                        {new Date(document.updatedAt).toLocaleString()}
-                      </td>
-                      <td className="px-3 py-2">
-                        <div className="flex justify-end gap-1">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="xs"
-                            disabled={document.status !== 'ready'}
-                            onClick={() => void handlePreview(document)}
-                          >
-                            预览
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="xs"
-                            onClick={() => void handleReindex(document)}
-                          >
-                            重建索引
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="xs"
-                            onClick={() => void handleDeleteDocument(document)}
-                          >
-                            删除
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="px-3 py-2 text-center text-muted-foreground">
+                          {new Date(document.updatedAt).toLocaleString()}
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="flex justify-center gap-1">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="xs"
+                              disabled={document.status !== 'ready'}
+                              onClick={() => void handlePreview(document)}
+                            >
+                              预览
+                            </Button>
+                            {document.status === 'error' && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="xs"
+                                onClick={() => setErrorTarget(document)}
+                              >
+                                错误
+                              </Button>
+                            )}
+                            <Button
+                              type="button"
+                              variant={
+                                document.status === 'error'
+                                  ? 'secondary'
+                                  : 'ghost'
+                              }
+                              size="xs"
+                              disabled={isProcessing || isReindexing}
+                              onClick={() => void handleReindex(document)}
+                            >
+                              {isReindexing ? '提交中' : '重新入库'}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="xs"
+                              disabled={isReindexing}
+                              onClick={() =>
+                                void handleDeleteDocument(document)
+                              }
+                            >
+                              删除
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                   {documents.length === 0 && (
                     <tr>
                       <td
