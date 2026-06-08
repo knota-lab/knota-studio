@@ -2,17 +2,10 @@ import { Icon } from '@iconify/react';
 import { useRequest } from 'ahooks';
 import dayjs from 'dayjs';
 import type { ChangeEvent } from 'react';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Markdown from 'react-markdown';
-import { useLocation, useNavigate } from 'react-router-dom';
-import remarkGfm from 'remark-gfm';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { smallUpload } from '@/api/files';
-import type {
-  ChatSession,
-  ChatSessionDetail,
-  QaPhase,
-  QaStreamEvent,
-} from '@/api/knowledge-base';
+import type { ChatSession, QaPhase, QaStreamEvent } from '@/api/knowledge-base';
 import {
   askQuestionStream,
   debugExportSession,
@@ -20,16 +13,17 @@ import {
   exportSession,
   getChatSession,
   listChatSessions,
+  listLibraries,
   postToolResult,
 } from '@/api/knowledge-base';
 import { getUserMenus } from '@/api/menu';
-import { Button } from '@/components/ui/button';
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
-import type { TFn } from '@/i18n';
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { useT } from '@/i18n';
 import {
   executeFrontendTool,
@@ -43,583 +37,34 @@ import {
 import { cn } from '@/lib/utils';
 import { useAgentStore } from '@/stores/agent';
 import { toast } from '@/utils/toast';
-
-// ─── Types ──────────────────────────────────────────────
-
-interface ContentPart {
-  createdAt: string;
-  type: 'text' | 'tool_call';
-  content?: string;
-  toolName?: string;
-  toolCallId?: string;
-  status?: 'running' | 'completed';
-  resultPreview?: string;
-  resultFull?: string;
-  durationMs?: number;
-}
-
-interface UiMessage {
-  key: string;
-  role: 'user' | 'assistant';
-  content: string;
-  parts: ContentPart[];
-  loading: boolean;
-  hasMaterial: boolean;
-  materialType: 'file' | 'inline' | 'knowledge' | undefined;
-  fileName: string | undefined;
-  inlineText: string | undefined;
-  knowledgeScopeLabel: string | undefined;
-  phase: string | undefined;
-  fileIds: string[];
-  fileNames: string[];
-  createdAt: string;
-}
-
-interface AttachedFile {
-  id: string;
-  name: string;
-}
-
-interface KnowledgeScope {
-  libraryId?: string;
-  folderId?: string;
-  label: string;
-}
-
-// ─── Constants ──────────────────────────────────────────
-
-const createToolCallLabels = (t: TFn): Record<string, string> => ({
-  // biome-ignore lint/style/useNamingConvention: key matches server tool name
-  list_materials: t('KbChat.tool.listMaterials', '查看可用材料'),
-  // biome-ignore lint/style/useNamingConvention: key matches server tool name
-  read_material: t('KbChat.tool.readMaterial', '读取材料'),
-  // biome-ignore lint/style/useNamingConvention: key matches server tool name
-  search_material: t('KbChat.tool.searchMaterial', '搜索材料'),
-  // biome-ignore lint/style/useNamingConvention: key matches server tool name
-  search_knowledge_base: t('KbChat.tool.searchKb', '搜索知识库'),
-  // biome-ignore lint/style/useNamingConvention: key matches page tool name
-  page_list_actions: t('KbChat.tool.pageListActions', '浏览页面操作'),
-  // biome-ignore lint/style/useNamingConvention: key matches page tool name
-  page_get_action_detail: t('KbChat.tool.pageGetActionDetail', '查看操作详情'),
-  // biome-ignore lint/style/useNamingConvention: key matches page tool name
-  page_query_table: t('KbChat.tool.pageQueryTable', '查询表格数据'),
-  // biome-ignore lint/style/useNamingConvention: key matches page tool name
-  page_execute_action: t('KbChat.tool.pageExecuteAction', '执行页面操作'),
-  // biome-ignore lint/style/useNamingConvention: key matches page tool name
-  page_get_form_values: t('KbChat.tool.pageGetFormValues', '获取表单数据'),
-  // biome-ignore lint/style/useNamingConvention: key matches global tool name
-  list_available_pages: t('KbChat.tool.listAvailablePages', '查看可用页面'),
-  // biome-ignore lint/style/useNamingConvention: key matches global tool name
-  navigate_to_page: t('KbChat.tool.navigateToPage', '导航到页面'),
-});
-
-const createPhaseLabelMap = (
-  t: TFn,
-): Record<string, (detail: Record<string, unknown>) => string> => ({
-  MaterialProcessing: (detail) => {
-    const d = detail as { totalChunks?: number | null };
-    return d.totalChunks != null
-      ? t(
-          'KbChat.phase.materialProcessingCount',
-          '正在处理材料 ({{count}} 片段)',
-          { count: d.totalChunks },
-        )
-      : t('KbChat.phase.materialProcessing', '正在处理材料...');
-  },
-  GeneratingAnswer: () => t('KbChat.phase.generatingAnswer', '正在生成回答...'),
-  Persisting: () => t('KbChat.phase.persisting', '正在保存...'),
-});
-
-const inlineTextThreshold = 1500;
-
-const remarkPlugins = [remarkGfm];
-
-let messageKeyCounter = 0;
-const nextMsgKey = () => `msg-${++messageKeyCounter}-${Date.now()}`;
-
-const buildKnowledgeScopeLabel = (
-  refs: ChatSessionDetail['messages'][number]['materialRefs'],
-  t: TFn,
-) => {
-  if (refs?.folderId) {
-    return t('KbChat.material.folderScope', '知识库目录范围');
-  }
-  if (refs?.libraryId) {
-    return t('KbChat.material.libraryScope', '知识库范围');
-  }
-  return undefined;
-};
-
-const resolveMaterialType = (
-  inlineRef: unknown,
-  scopeLabel: string | undefined,
-): UiMessage['materialType'] => {
-  if (inlineRef) return 'inline';
-  if (scopeLabel) return 'knowledge';
-  return undefined;
-};
-
-// ─── Helper: download blob ──────────────────────────────
-
-const downloadBlob = (blob: Blob, filename: string) => {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-};
-
-// ─── Helper: format time divider ────────────────────────
-
-const formatTimeDivider = (dateStr: string): string => {
-  const d = dayjs(dateStr);
-  const today = dayjs();
-  const isToday = d.format('YYYY-MM-DD') === today.format('YYYY-MM-DD');
-  const prefix = isToday ? '今天' : d.format('MM/DD');
-  return `${prefix} ${d.format('HH:mm')}`;
-};
-
-// ─── Sub: Page Context Popover ───────────────────────────
-
-/** Serialize capabilities for display, replacing functions with signatures. */
-const serializeCaps = (caps: Record<string, unknown>): string => {
-  const replacer = (_key: string, value: unknown): unknown => {
-    if (typeof value === 'function') {
-      return `[Function: ${value.name || 'anonymous'}]`;
-    }
-    return value;
-  };
-  return JSON.stringify(caps, replacer, 2);
-};
-
-const PageContextPopover = memo(() => {
-  const t = useT();
-  const [open, setOpen] = useState(false);
-  const capabilities = useAgentStore((s) => s.capabilities);
-
-  const formatted = useMemo(() => {
-    if (!capabilities) return null;
-    return serializeCaps(capabilities as unknown as Record<string, unknown>);
-  }, [capabilities]);
-
-  return (
-    <div className="relative">
-      <button
-        type="button"
-        className={cn(
-          'size-7 grid place-items-center rounded-md border-none bg-transparent cursor-pointer transition-all',
-          open
-            ? 'bg-accent text-foreground'
-            : 'text-muted-foreground hover:bg-accent hover:text-foreground',
-          !capabilities && 'opacity-40 pointer-events-none',
-        )}
-        title={t('KbChat.pageContext.title', '页面元数据')}
-        onClick={() => setOpen((prev) => !prev)}
-      >
-        <Icon icon="lucide:info" className="size-4" />
-      </button>
-      {open && (
-        <>
-          {/* Backdrop */}
-          {/* biome-ignore lint/a11y/noStaticElementInteractions: click-outside backdrop */}
-          <div
-            className="fixed inset-0 z-40"
-            onClick={() => setOpen(false)}
-            onKeyDown={() => {}}
-            role="presentation"
-          />
-          {/* Popover */}
-          <div className="absolute right-0 top-full mt-1 z-50 w-[400px] max-h-[500px] overflow-y-auto rounded-md border bg-card shadow-lg">
-            <div className="flex items-center justify-between px-3 py-2 border-b">
-              <span className="text-xs font-medium text-muted-foreground">
-                {t('KbChat.pageContext.capabilities', '当前页面能力')}
-              </span>
-              <button
-                type="button"
-                className="size-5 grid place-items-center rounded text-muted-foreground hover:text-foreground bg-transparent border-none cursor-pointer"
-                onClick={() => setOpen(false)}
-              >
-                <Icon icon="lucide:x" className="size-3" />
-              </button>
-            </div>
-            <pre className="p-3 text-[11px] font-mono leading-relaxed text-muted-foreground whitespace-pre-wrap break-all">
-              {formatted ??
-                t('KbChat.pageContext.noCapabilities', '无页面能力注册')}
-            </pre>
-          </div>
-        </>
-      )}
-    </div>
-  );
-});
-
-// ─── Sub: Empty State ───────────────────────────────────
-
-const EmptyState = memo(({ placeholder }: { placeholder: string }) => (
-  <div className="flex flex-1 flex-col items-center justify-center gap-4 text-muted-foreground">
-    <div className="flex size-16 items-center justify-center rounded-2xl bg-linear-to-br from-teal-500 to-teal-600 shadow-lg animate-pulse">
-      <Icon icon="lucide:message-square" className="size-8 text-white" />
-    </div>
-    <p className="text-sm">{placeholder}</p>
-  </div>
-));
-
-// ─── Sub: Tool Call Block ───────────────────────────────
-
-const ToolCallBlock = memo(
-  ({ part, labels }: { part: ContentPart; labels: Record<string, string> }) => {
-    const [expanded, setExpanded] = useState(false);
-    const isCompleted = part.status === 'completed';
-    const label = labels[part.toolName ?? ''] ?? part.toolName ?? '';
-    let duration: string | undefined;
-    if (part.durationMs != null) {
-      duration =
-        part.durationMs < 1000
-          ? `${part.durationMs}ms`
-          : `${(part.durationMs / 1000).toFixed(1)}s`;
-    }
-
-    return (
-      <div
-        className={cn(
-          'flex flex-col py-1 pl-3 border-l-2 transition-colors duration-200',
-          isCompleted
-            ? 'border-l-emerald-300 dark:border-l-emerald-700 hover:border-l-teal-400 dark:hover:border-l-teal-500'
-            : 'border-l-teal-400 dark:border-l-teal-500 hover:border-l-teal-500 dark:hover:border-l-teal-400',
-        )}
-      >
-        <button
-          type="button"
-          className="flex items-center gap-2 cursor-pointer select-none min-h-6.5 py-1 text-left bg-transparent border-none w-full"
-          onClick={() => setExpanded(!expanded)}
-        >
-          <span className="font-mono text-xs font-medium bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300 px-2 py-0.5 rounded whitespace-nowrap">
-            {label}
-          </span>
-          {duration != null && (
-            <span className="font-mono text-[11px] text-muted-foreground">
-              {duration}
-            </span>
-          )}
-          {!isCompleted && (
-            <span className="inline-block size-2.5 border-[1.5px] border-emerald-200 dark:border-emerald-700 border-t-teal-500 dark:border-t-teal-400 rounded-full animate-spin" />
-          )}
-          {isCompleted && !expanded && (
-            <span className="text-muted-foreground">
-              <Icon icon="lucide:chevron-down" className="size-3 opacity-50" />
-            </span>
-          )}
-          {expanded && (
-            <span className="text-muted-foreground">
-              <Icon icon="lucide:chevron-up" className="size-3" />
-            </span>
-          )}
-        </button>
-        {isCompleted && (
-          <span className="flex items-start gap-1 text-xs text-muted-foreground mt-0.5 pl-0.5 leading-relaxed min-w-0">
-            {!expanded && (
-              <Icon
-                icon="lucide:check"
-                className="size-2.5 text-emerald-500 shrink-0 mt-0.5"
-              />
-            )}
-            {!expanded && (
-              <span className="truncate">{part.resultPreview ?? ''}</span>
-            )}
-          </span>
-        )}
-        <div
-          className={cn(
-            'overflow-hidden transition-all duration-250',
-            expanded ? 'max-h-100 opacity-100 mt-2' : 'max-h-0 opacity-0',
-          )}
-        >
-          <div className="rounded-md border bg-card p-3 font-mono text-xs leading-relaxed text-muted-foreground max-h-50 overflow-y-auto shadow-xs">
-            {part.resultPreview ?? ''}
-          </div>
-        </div>
-      </div>
-    );
-  },
-);
-
-// ─── Sub: User Message ──────────────────────────────────
-
-const UserMessage = memo(
-  ({
-    msg,
-    t,
-    onCopyRound,
-  }: {
-    msg: UiMessage;
-    t: TFn;
-    onCopyRound?: () => void;
-  }) => (
-    <div className="group/user-msg flex flex-col items-end gap-1 mb-3">
-      <div className="max-w-[82%] flex flex-col gap-2 rounded-xl rounded-br-sm bg-user-bubble text-white px-4 py-3 text-sm leading-relaxed shadow-sm">
-        {/* Inline text attachment */}
-        {msg.materialType === 'inline' && msg.inlineText && (
-          <div className="rounded-md bg-white/15 border border-white/20 p-3">
-            <div className="flex items-center gap-2 mb-1">
-              <Icon icon="lucide:file-text" className="size-3.5" />
-              <span className="text-xs font-medium">
-                {t('KbChat.material.pastedText', '粘贴文本')}
-              </span>
-              <span className="inline-flex px-1.5 rounded-full bg-white/18 text-white/75 text-[10px] font-medium">
-                {msg.inlineText.length} {t('KbChat.material.charCount', '字符')}
-              </span>
-            </div>
-            <div className="text-[11px] font-mono opacity-60 leading-snug max-h-[2.4em] overflow-hidden whitespace-pre-wrap line-clamp-2">
-              {msg.inlineText}
-            </div>
-          </div>
-        )}
-        {/* File attachments */}
-        {msg.fileNames.length > 0 && (
-          <div className="flex flex-wrap gap-2 mb-1">
-            {msg.fileNames.map((name) => (
-              <div
-                key={name}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-white/10 border border-white/15 max-w-65 min-w-0"
-              >
-                <div className="size-7 rounded bg-white/15 grid place-items-center shrink-0">
-                  <Icon icon="lucide:file-text" className="size-3.5" />
-                </div>
-                <span className="text-xs font-medium truncate">{name}</span>
-              </div>
-            ))}
-          </div>
-        )}
-        {msg.knowledgeScopeLabel && (
-          <div className="flex items-center gap-2 rounded-md border border-white/15 bg-white/10 px-3 py-1.5 text-xs font-medium">
-            <Icon icon="lucide:library" className="size-3.5" />
-            <span className="truncate">{msg.knowledgeScopeLabel}</span>
-          </div>
-        )}
-        <span>{msg.content}</span>
-      </div>
-      {onCopyRound && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-7 opacity-0 group-hover/user-msg:opacity-100 transition-opacity"
-              onClick={onCopyRound}
-            >
-              <Icon icon="lucide:copy" className="size-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="left">
-            {t('KbChat.copyRound', '复制本轮对话')}
-          </TooltipContent>
-        </Tooltip>
-      )}
-    </div>
-  ),
-);
-
-// ─── Sub: AI Message ────────────────────────────────────
-
-const AiMessageInner = ({
-  msg,
-  t,
-  labels,
-}: {
-  msg: UiMessage;
-  t: (key: string, fallback: string) => string;
-  labels: Record<string, string>;
-}) => (
-  <div className="flex gap-3 items-start mb-3">
-    <div className="size-6.5 rounded-md bg-linear-to-br from-teal-500 to-teal-600 grid place-items-center shrink-0 mt-0.5">
-      <Icon icon="lucide:layers" className="size-3.5 text-white" />
-    </div>
-    <div className="flex-1 min-w-0 flex flex-col">
-      {msg.loading && msg.parts.length === 0 && !msg.content && (
-        <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-          <span className="inline-block size-2 border-[1.5px] border-emerald-200 dark:border-emerald-700 border-t-teal-500 dark:border-t-teal-400 rounded-full animate-spin" />
-          <span>{msg.phase ?? t('KbChat.thinking', '思考中...')}</span>
-        </div>
-      )}
-      {msg.parts.length > 0 &&
-        msg.parts.map((part, idx) => {
-          const partKey =
-            part.type === 'tool_call'
-              ? `tc-${part.toolCallId ?? idx}`
-              : `txt-${part.createdAt ?? part.content?.slice(0, 20) ?? idx}`;
-          if (part.type === 'tool_call') {
-            return <ToolCallBlock key={partKey} part={part} labels={labels} />;
-          }
-          // text part
-          if (!part.content) return null;
-          return (
-            <div
-              key={partKey}
-              className="text-sm leading-relaxed text-foreground prose prose-sm max-w-none prose-strong:text-foreground prose-em:bg-gradient-to-t prose-em:from-amber-200/60 dark:prose-em:from-amber-500/30 prose-em:to-transparent prose-em:px-0.5 prose-em:font-medium prose-em:not-italic prose-headings:text-foreground prose-headings:font-semibold"
-            >
-              <Markdown remarkPlugins={remarkPlugins}>{part.content}</Markdown>
-            </div>
-          );
-        })}
-      {!msg.loading && msg.content && msg.parts.length === 0 && (
-        <div className="text-sm leading-relaxed text-foreground prose prose-sm max-w-none prose-strong:text-foreground prose-em:bg-gradient-to-t prose-em:from-amber-200/60 dark:prose-em:from-amber-500/30 prose-em:to-transparent prose-em:px-0.5 prose-em:font-medium prose-em:not-italic">
-          <Markdown remarkPlugins={remarkPlugins}>{msg.content}</Markdown>
-        </div>
-      )}
-    </div>
-  </div>
-);
-const AiMessage = memo(AiMessageInner);
-
-// ─── Round Markdown Formatter ────────────────────────────
-
-const formatRoundMarkdown = (round: {
-  userMsg?: UiMessage;
-  aiMsg?: UiMessage;
-}): string => {
-  const sections: string[] = [];
-
-  if (round.userMsg) {
-    sections.push(`## 用户\n\n${round.userMsg.content}`);
-  }
-
-  if (round.aiMsg) {
-    const parts: string[] = [];
-
-    for (const part of round.aiMsg.parts) {
-      if (part.type === 'text' && part.content) {
-        parts.push(part.content);
-      } else if (part.type === 'tool_call') {
-        const name = part.toolName ?? 'unknown';
-        const duration =
-          part.durationMs != null ? ` (${part.durationMs}ms)` : '';
-        const preview = part.resultPreview
-          ? `\n> \`${part.resultPreview.slice(0, 200)}\``
-          : '';
-        parts.push(
-          `> **🔍 ${name}**${duration}${preview}\n> **参数:**\n> \`—\``,
-        );
-      }
-    }
-
-    const body = parts.length > 0 ? parts.join('\n\n') : round.aiMsg.content;
-
-    sections.push(`## 助手\n\n${body ?? ''}`);
-  }
-
-  return sections.join('\n\n---\n\n');
-};
-
-// ─── Sub: Time Divider ──────────────────────────────────
-
-const TimeDividerInner = ({ label }: { label: string }) => (
-  <div className="flex items-center gap-3 my-4">
-    <div className="flex-1 h-px bg-border" />
-    <span className="text-[11px] text-muted-foreground font-medium tracking-wide whitespace-nowrap">
-      {label}
-    </span>
-    <div className="flex-1 h-px bg-border" />
-  </div>
-);
-const TimeDivider = memo(TimeDividerInner);
-
-// ─── Sub: Session Item ──────────────────────────────────
-
-const SessionItemInner = ({
-  session,
-  isActive,
-  onSelect,
-  deleteConfirmId,
-  onDeleteConfirm,
-  onDeleteCancel,
-  onDeleteRequest,
-  t,
-}: {
-  session: ChatSession;
-  isActive: boolean;
-  onSelect: () => void;
-  deleteConfirmId: string | undefined;
-  onDeleteConfirm: () => void;
-  onDeleteCancel: () => void;
-  onDeleteRequest: () => void;
-  t: TFn;
-}) => (
-  // biome-ignore lint/a11y/useSemanticElements: contains nested buttons, cannot use <button>
-  <div
-    role="button"
-    tabIndex={0}
-    className={cn(
-      'group flex w-full items-center gap-2 px-3 py-2 rounded-md cursor-pointer transition-colors relative text-left',
-      isActive ? 'bg-orange-50 dark:bg-orange-900/25' : 'hover:bg-accent',
-    )}
-    onClick={onSelect}
-    onKeyDown={(e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        onSelect();
-      }
-    }}
-  >
-    <span
-      className={cn(
-        'flex-1 min-w-0 text-xs truncate',
-        isActive
-          ? 'text-orange-700 dark:text-orange-400 font-medium'
-          : 'text-foreground',
-      )}
-    >
-      {session.title ?? t('KbChat.session.untitled', '未命名')}
-    </span>
-    <button
-      type="button"
-      className="size-5.5 grid place-items-center rounded border-none bg-transparent text-muted-foreground shrink-0 opacity-0 group-hover:opacity-100 transition-all hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-600 dark:hover:text-red-400 cursor-pointer"
-      onClick={(e) => {
-        e.stopPropagation();
-        onDeleteRequest();
-      }}
-    >
-      <Icon icon="lucide:trash-2" className="size-3" />
-    </button>
-    {/* Delete confirmation popover */}
-    {deleteConfirmId === session.id && (
-      <div
-        role="dialog"
-        aria-label={t('KbChat.session.confirmDelete', '确认删除')}
-        className="absolute right-0 top-full translate-y-0.5 bg-card border border-border rounded-md p-3 shadow-md z-50 whitespace-nowrap text-xs text-muted-foreground"
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => e.stopPropagation()}
-      >
-        <div className="mb-2 leading-relaxed">
-          {t('KbChat.session.confirmDeleteMsg', '确认删除该会话？')}
-        </div>
-        <div className="flex gap-2 justify-end">
-          <button
-            type="button"
-            className="px-3 py-0.5 rounded bg-muted text-muted-foreground text-xs border-none cursor-pointer hover:bg-accent"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDeleteCancel();
-            }}
-          >
-            {t('Common.cancel', '取消')}
-          </button>
-          <button
-            type="button"
-            className="px-3 py-0.5 rounded bg-red-600 text-white text-xs border-none cursor-pointer hover:bg-red-700"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDeleteConfirm();
-            }}
-          >
-            {t('Common.confirm', '确认')}
-          </button>
-        </div>
-      </div>
-    )}
-  </div>
-);
-const SessionItem = memo(SessionItemInner);
+import {
+  AiMessage,
+  EmptyState,
+  PageContextPopover,
+  SessionItem,
+  TimeDivider,
+  UserMessage,
+} from './components';
+import {
+  allKnowledgeScopeValue,
+  buildKnowledgeScopeLabel,
+  createPhaseLabelMap,
+  createToolCallLabels,
+  downloadBlob,
+  formatRoundMarkdown,
+  formatTimeDivider,
+  inlineTextThreshold,
+  loadLibraryFolders,
+  nextMsgKey,
+  resolveMaterialType,
+  wholeLibraryFolderValue,
+} from './helpers';
+import type {
+  AttachedFile,
+  ContentPart,
+  KnowledgeScope,
+  UiMessage,
+} from './types';
 
 // ─── Main Component ─────────────────────────────────────
 
@@ -639,7 +84,8 @@ const KbChat = () => {
   const [isStreaming, setIsStreaming] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [inlineText, setInlineText] = useState<string | undefined>();
-  const [knowledgeScope, setKnowledgeScope] = useState<KnowledgeScope>();
+  const [selectedLibraryId, setSelectedLibraryId] = useState<string>();
+  const [selectedFolderId, setSelectedFolderId] = useState<string>();
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | undefined>();
 
   const abortRef = useRef<AbortController | null>(null);
@@ -649,17 +95,20 @@ const KbChat = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollReasonRef = useRef<'bottom' | 'top' | null>(null);
   const scrollToMsgKeyRef = useRef<string | null>(null);
+  const activeSessionIdRef = useRef<string | undefined>(undefined);
 
   const navigate = useNavigate();
-  const location = useLocation();
   const { data: menuTree } = useRequest(getUserMenus, { manual: false });
-
-  useEffect(() => {
-    const state = location.state as { kbScope?: KnowledgeScope } | null;
-    if (state?.kbScope) {
-      setKnowledgeScope(state.kbScope);
-    }
-  }, [location.state]);
+  const { data: libraries = [] } = useRequest(listLibraries);
+  const { data: scopeFolders = [] } = useRequest(
+    async () => {
+      if (!selectedLibraryId) return [];
+      return loadLibraryFolders(selectedLibraryId);
+    },
+    {
+      refreshDeps: [selectedLibraryId],
+    },
+  );
 
   // --- Sessions loading ---
   const { loading: sessionsLoading, run: loadSessions } = useRequest(
@@ -671,6 +120,11 @@ const KbChat = () => {
       },
     },
   );
+
+  const setActiveSession = useCallback((id: string | undefined) => {
+    activeSessionIdRef.current = id;
+    setActiveSessionId(id);
+  }, []);
 
   // Load session messages
   const { run: loadSessionMessages } = useRequest(getChatSession, {
@@ -735,6 +189,25 @@ const KbChat = () => {
     loadSessions();
   }, [loadSessions]);
 
+  useEffect(() => {
+    if (
+      selectedLibraryId &&
+      !libraries.some((library) => library.id === selectedLibraryId)
+    ) {
+      setSelectedLibraryId(undefined);
+      setSelectedFolderId(undefined);
+    }
+  }, [libraries, selectedLibraryId]);
+
+  useEffect(() => {
+    if (
+      selectedFolderId &&
+      !scopeFolders.some((folder) => folder.id === selectedFolderId)
+    ) {
+      setSelectedFolderId(undefined);
+    }
+  }, [scopeFolders, selectedFolderId]);
+
   // Scroll handling
   // biome-ignore lint/correctness/useExhaustiveDependencies: messages change triggers scroll
   useEffect(() => {
@@ -796,6 +269,31 @@ const KbChat = () => {
     [sessions, activeSessionId],
   );
 
+  const selectedLibrary = useMemo(
+    () => libraries.find((library) => library.id === selectedLibraryId),
+    [libraries, selectedLibraryId],
+  );
+
+  const selectedFolder = useMemo(
+    () => scopeFolders.find((folder) => folder.id === selectedFolderId),
+    [scopeFolders, selectedFolderId],
+  );
+
+  const knowledgeScope = useMemo<KnowledgeScope | undefined>(() => {
+    if (!selectedLibrary) return undefined;
+    if (selectedFolder) {
+      return {
+        libraryId: selectedLibrary.id,
+        folderId: selectedFolder.id,
+        label: `知识库范围：${selectedLibrary.name} / ${selectedFolder.name}`,
+      };
+    }
+    return {
+      libraryId: selectedLibrary.id,
+      label: `知识库范围：${selectedLibrary.name}`,
+    };
+  }, [selectedFolder, selectedLibrary]);
+
   const sessionMeta = useMemo(() => {
     if (!activeSession) return '';
     const title = activeSession.title ?? t('KbChat.session.untitled', '未命名');
@@ -853,20 +351,20 @@ const KbChat = () => {
   const handleSwitchSession = useCallback(
     (session: ChatSession) => {
       scrollReasonRef.current = 'bottom';
-      setActiveSessionId(session.id);
+      setActiveSession(session.id);
       setSessionListOpen(false);
       setDeleteConfirmId(undefined);
       loadSessionMessages(session.id);
     },
-    [loadSessionMessages],
+    [loadSessionMessages, setActiveSession],
   );
 
   const handleNewChat = useCallback(() => {
     scrollReasonRef.current = null;
-    setActiveSessionId(undefined);
+    setActiveSession(undefined);
     setMessages([]);
     setDeleteConfirmId(undefined);
-  }, []);
+  }, [setActiveSession]);
 
   const handleDeleteSession = useCallback(
     (id: string) => {
@@ -874,13 +372,13 @@ const KbChat = () => {
         toast.success(t('KbChat.session.deleted', '会话已删除'));
         setSessions((prev) => prev.filter((s) => s.id !== id));
         if (activeSessionId === id) {
-          setActiveSessionId(undefined);
+          setActiveSession(undefined);
           setMessages([]);
         }
         setDeleteConfirmId(undefined);
       });
     },
-    [activeSessionId, t],
+    [activeSessionId, setActiveSession, t],
   );
 
   // --- Export ---
@@ -961,6 +459,7 @@ const KbChat = () => {
   const handleSend = useCallback(() => {
     const text = inputValue.trim();
     if (!text || isStreaming) return;
+    const requestSessionId = activeSessionIdRef.current;
 
     // Build user message
     let materialType: UiMessage['materialType'];
@@ -1057,7 +556,7 @@ const KbChat = () => {
     } = {
       instruction: text,
       material,
-      sessionId: activeSessionId,
+      sessionId: requestSessionId,
     };
 
     // Attach page tools + context if capabilities are registered
@@ -1078,6 +577,11 @@ const KbChat = () => {
 
     const onEvent = (event: QaStreamEvent) => {
       // --- Side effects (outside state updater) ---
+      if (event.type === 'Started') {
+        const e = event as { type: 'Started'; data: { sessionId: string } };
+        setActiveSession(e.data.sessionId);
+      }
+
       if (event.type === 'ToolCallStarted') {
         const e = event as {
           type: 'ToolCallStarted';
@@ -1173,11 +677,9 @@ const KbChat = () => {
 
         const assistant = { ...updated[aIdx], parts: [...updated[aIdx].parts] };
 
-        const handleEvent: Record<string, (ev: QaStreamEvent) => void> = {
-          Started: (ev) => {
-            const e = ev as { type: 'Started'; data: { sessionId: string } };
-            setActiveSessionId(e.data.sessionId);
-          },
+        const handleEvent: Partial<
+          Record<string, (ev: QaStreamEvent) => void>
+        > = {
           PhaseChanged: (ev) => {
             const e = ev as {
               type: 'PhaseChanged';
@@ -1273,7 +775,12 @@ const KbChat = () => {
               ];
             }
           },
-          Completed: () => {
+          Completed: (ev) => {
+            const e = ev as {
+              type: 'Completed';
+              data: { response: { sessionId: string } };
+            };
+            setActiveSession(e.data.response.sessionId);
             assistant.loading = false;
             setIsStreaming(false);
             abortRef.current = null;
@@ -1327,7 +834,7 @@ const KbChat = () => {
     attachedFiles,
     inlineText,
     knowledgeScope,
-    activeSessionId,
+    setActiveSession,
     loadSessions,
     t,
     phaseLabelMap,
@@ -1516,6 +1023,60 @@ const KbChat = () => {
 
       {/* ─── Input area ─── */}
       <div className="shrink-0 px-5 py-4 bg-card border-t">
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <Select
+            value={selectedLibraryId ?? allKnowledgeScopeValue}
+            onValueChange={(value) => {
+              setSelectedFolderId(undefined);
+              setSelectedLibraryId(
+                value === allKnowledgeScopeValue ? undefined : value,
+              );
+            }}
+          >
+            <SelectTrigger className="h-8 w-52 bg-background text-xs">
+              <SelectValue placeholder="全部知识库" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={allKnowledgeScopeValue}>全部知识库</SelectItem>
+              {libraries.map((library) => (
+                <SelectItem key={library.id} value={library.id}>
+                  {library.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {selectedLibraryId && (
+            <Select
+              value={selectedFolderId ?? wholeLibraryFolderValue}
+              onValueChange={(value) => {
+                setSelectedFolderId(
+                  value === wholeLibraryFolderValue ? undefined : value,
+                );
+              }}
+            >
+              <SelectTrigger className="h-8 w-56 bg-background text-xs">
+                <SelectValue placeholder="整库" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={wholeLibraryFolderValue}>
+                  整个知识库
+                </SelectItem>
+                {scopeFolders.map((folder) => (
+                  <SelectItem key={folder.id} value={folder.id}>
+                    {'  '.repeat(folder.depth)}
+                    {folder.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+
+          <span className="text-xs text-muted-foreground">
+            {knowledgeScope?.label ?? '知识库范围：全部可见文档'}
+          </span>
+        </div>
+
         {/* Material indicators */}
         {(attachedFiles.length > 0 || inlineText || knowledgeScope) && (
           <div className="flex flex-wrap gap-1.5 mb-2">
@@ -1556,7 +1117,10 @@ const KbChat = () => {
                 <button
                   type="button"
                   className="grid place-items-center border-none bg-transparent p-0 text-purple-500 cursor-pointer hover:text-purple-700 dark:hover:text-purple-200"
-                  onClick={() => setKnowledgeScope(undefined)}
+                  onClick={() => {
+                    setSelectedLibraryId(undefined);
+                    setSelectedFolderId(undefined);
+                  }}
                 >
                   <Icon icon="lucide:x" className="size-3" />
                 </button>

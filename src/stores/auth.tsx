@@ -1,4 +1,3 @@
-import { useLocalStorageState } from 'ahooks';
 import type { ReactNode } from 'react';
 import {
   createContext,
@@ -29,15 +28,34 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
+const readStoredToken = (): string | undefined => {
+  const raw = window.localStorage.getItem(tokenKey);
+  if (!raw) return undefined;
+  try {
+    const parsed = JSON.parse(raw);
+    return typeof parsed === 'string' ? parsed : undefined;
+  } catch {
+    return raw;
+  }
+};
+
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [token, setToken] = useLocalStorageState<string | undefined>(tokenKey);
+  const [token, setTokenState] = useState<string | undefined>(readStoredToken);
   const [user, setUser] = useState<CurrentUserResponse | null>(null);
   const [loading, setLoading] = useState(Boolean(token));
+
+  const setToken = useCallback((nextToken: string | undefined) => {
+    setTokenState(nextToken);
+    if (nextToken) {
+      window.localStorage.setItem(tokenKey, JSON.stringify(nextToken));
+    } else {
+      window.localStorage.removeItem(tokenKey);
+    }
+  }, []);
 
   const clearAuthState = useCallback(() => {
     setToken(undefined);
     setUser(null);
-    window.localStorage.removeItem(tokenKey);
     clearAllI18nCaches();
   }, [setToken]);
 
@@ -60,12 +78,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const validateUser = async () => {
       setLoading(true);
 
-      const currentUser = await getCurrentUser();
-
-      if (active) {
-        setUser(currentUser);
+      try {
+        const currentUser = await getCurrentUser();
+        if (active) {
+          setUser(currentUser);
+        }
+      } catch {
+        if (active) {
+          setUser(null);
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
       }
-      setLoading(false);
     };
 
     void validateUser();

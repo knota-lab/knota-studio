@@ -2,7 +2,6 @@ import { Icon } from '@iconify/react';
 import { useRequest } from 'ahooks';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { useNavigate } from 'react-router-dom';
 import { DataTablePagination } from '@/components/data-table/pagination';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -47,19 +46,6 @@ const statusVariant = (status: string) => {
   return 'secondary';
 };
 
-const buildKnowledgeScopeLabel = (
-  selectedLibrary: KbLibrary | null,
-  selectedFolder: KbFolder | null,
-) => {
-  if (selectedFolder) {
-    return `知识库范围：${selectedLibrary?.name ?? '当前知识库'} / ${selectedFolder.name}`;
-  }
-  if (selectedLibrary) {
-    return `知识库范围：${selectedLibrary.name}`;
-  }
-  return undefined;
-};
-
 const replaceAssetUrls = (
   markdown: string,
   replacements: Map<string, string>,
@@ -70,7 +56,6 @@ const replaceAssetUrls = (
   );
 
 const KnowledgeBasePage = () => {
-  const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [libraries, setLibraries] = useState<KbLibrary[]>([]);
   const [folders, setFolders] = useState<KbFolder[]>([]);
@@ -105,11 +90,6 @@ const KnowledgeBasePage = () => {
   const selectedFolder = useMemo(
     () => folders.find((item) => item.id === selection?.folderId) ?? null,
     [folders, selection?.folderId],
-  );
-
-  const knowledgeScopeLabel = buildKnowledgeScopeLabel(
-    selectedLibrary,
-    selectedFolder,
   );
 
   const loadLibraries = useCallback(async () => {
@@ -485,27 +465,6 @@ const KnowledgeBasePage = () => {
                     }
                   />
                   {hasIndexingDocuments ? '刷新中' : '刷新'}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={!selection || !knowledgeScopeLabel}
-                  onClick={() => {
-                    if (!selection || !knowledgeScopeLabel) return;
-                    navigate('/chat', {
-                      state: {
-                        kbScope: {
-                          libraryId: selection.libraryId,
-                          folderId: selection.folderId,
-                          label: knowledgeScopeLabel,
-                        },
-                      },
-                    });
-                  }}
-                >
-                  <Icon icon="lucide:message-circle" className="mr-2 size-4" />
-                  按当前范围提问
                 </Button>
                 <Button
                   type="button"
