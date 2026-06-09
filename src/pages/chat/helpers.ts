@@ -59,7 +59,15 @@ export const createPhaseLabelMap = (
 
 export const buildKnowledgeScopeLabel = (refs: MaterialRefs, t: TFn) => {
   if (refs?.folderId) {
-    return t('KbChat.material.folderScope', '知识库目录范围');
+    return refs.includeSubfolders
+      ? t(
+          'KbChat.material.folderScopeWithChildren',
+          '知识库目录范围（含子目录）',
+        )
+      : t(
+          'KbChat.material.folderScopeCurrentOnly',
+          '知识库目录范围（仅当前目录）',
+        );
   }
   if (refs?.libraryId) {
     return t('KbChat.material.libraryScope', '知识库范围');

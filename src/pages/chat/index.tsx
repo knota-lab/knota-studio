@@ -29,6 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { useT } from '@/i18n';
 import {
   executeFrontendTool,
@@ -93,6 +94,7 @@ const KbChat = () => {
   const [knowledgeBaseEnabled, setKnowledgeBaseEnabled] = useState(false);
   const [selectedLibraryId, setSelectedLibraryId] = useState<string>();
   const [selectedFolderId, setSelectedFolderId] = useState<string>();
+  const [includeSubfolders, setIncludeSubfolders] = useState(true);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | undefined>();
 
   const abortRef = useRef<AbortController | null>(null);
@@ -203,6 +205,7 @@ const KbChat = () => {
     ) {
       setSelectedLibraryId(undefined);
       setSelectedFolderId(undefined);
+      setIncludeSubfolders(true);
     }
   }, [libraries, selectedLibraryId]);
 
@@ -212,6 +215,7 @@ const KbChat = () => {
       !scopeFolders.some((folder) => folder.id === selectedFolderId)
     ) {
       setSelectedFolderId(undefined);
+      setIncludeSubfolders(true);
     }
   }, [scopeFolders, selectedFolderId]);
 
@@ -294,25 +298,39 @@ const KbChat = () => {
       };
     }
     if (selectedFolder) {
+      const suffix = includeSubfolders ? '（含子目录）' : '（仅当前目录）';
       return {
         libraryId: selectedLibrary.id,
         folderId: selectedFolder.id,
-        label: `知识库范围：${selectedLibrary.name} / ${selectedFolder.name}`,
+        includeSubfolders,
+        label: `知识库范围：${selectedLibrary.name} / ${selectedFolder.name}${suffix}`,
       };
     }
     return {
       libraryId: selectedLibrary.id,
       label: `知识库范围：${selectedLibrary.name}`,
     };
-  }, [knowledgeBaseEnabled, selectedFolder, selectedLibrary]);
+  }, [
+    includeSubfolders,
+    knowledgeBaseEnabled,
+    selectedFolder,
+    selectedLibrary,
+  ]);
 
   const knowledgeScopeDisplay = useMemo(() => {
     if (!knowledgeBaseEnabled) return '不使用知识库';
     if (!selectedLibrary) return '全部知识库';
     if (selectedFolder)
-      return `${selectedLibrary.name} / ${selectedFolder.name}`;
+      return `${selectedLibrary.name} / ${selectedFolder.name}${
+        includeSubfolders ? ' · 含子目录' : ' · 仅当前目录'
+      }`;
     return selectedLibrary.name;
-  }, [knowledgeBaseEnabled, selectedFolder, selectedLibrary]);
+  }, [
+    includeSubfolders,
+    knowledgeBaseEnabled,
+    selectedFolder,
+    selectedLibrary,
+  ]);
 
   const sessionMeta = useMemo(() => {
     if (!activeSession) return '';
@@ -548,6 +566,7 @@ const KbChat = () => {
       inline: inlineText,
       libraryId: knowledgeScope?.libraryId,
       folderId: knowledgeScope?.folderId,
+      includeSubfolders: knowledgeScope?.includeSubfolders,
       fileIds:
         attachedFiles.length > 0 ? attachedFiles.map((f) => f.id) : undefined,
     };
@@ -566,6 +585,7 @@ const KbChat = () => {
         useKnowledgeBase?: boolean;
         libraryId?: string;
         folderId?: string;
+        includeSubfolders?: boolean;
         fileIds?: string[];
       };
       sessionId?: string;
@@ -1082,6 +1102,7 @@ const KbChat = () => {
                     setKnowledgeBaseEnabled(false);
                     setSelectedLibraryId(undefined);
                     setSelectedFolderId(undefined);
+                    setIncludeSubfolders(true);
                   }}
                 >
                   <Icon icon="lucide:x" className="size-3.5" />
@@ -1107,6 +1128,7 @@ const KbChat = () => {
                         setKnowledgeBaseEnabled(false);
                         setSelectedLibraryId(undefined);
                         setSelectedFolderId(undefined);
+                        setIncludeSubfolders(true);
                       }}
                     >
                       不使用
@@ -1122,6 +1144,7 @@ const KbChat = () => {
                   }
                   onValueChange={(value) => {
                     setSelectedFolderId(undefined);
+                    setIncludeSubfolders(true);
                     if (value === noKnowledgeScopeValue) {
                       setKnowledgeBaseEnabled(false);
                       setSelectedLibraryId(undefined);
@@ -1158,6 +1181,7 @@ const KbChat = () => {
                       setSelectedFolderId(
                         value === wholeLibraryFolderValue ? undefined : value,
                       );
+                      setIncludeSubfolders(true);
                     }}
                   >
                     <SelectTrigger className="h-8 bg-background text-xs">
@@ -1175,6 +1199,23 @@ const KbChat = () => {
                       ))}
                     </SelectContent>
                   </Select>
+                )}
+
+                {knowledgeBaseEnabled && selectedFolderId && (
+                  <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-2.5 py-2">
+                    <div className="min-w-0">
+                      <div className="text-xs font-medium text-foreground">
+                        包含子目录
+                      </div>
+                      <div className="mt-0.5 text-[11px] text-muted-foreground">
+                        开启后检索当前目录及全部下级目录
+                      </div>
+                    </div>
+                    <Switch
+                      checked={includeSubfolders}
+                      onCheckedChange={setIncludeSubfolders}
+                    />
+                  </div>
                 )}
               </div>
             </PopoverContent>

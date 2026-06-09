@@ -37,6 +37,7 @@ export interface AttachedFile {
 export interface KnowledgeScope {
   libraryId?: string;
   folderId?: string;
+  includeSubfolders?: boolean;
   label: string;
 }
 

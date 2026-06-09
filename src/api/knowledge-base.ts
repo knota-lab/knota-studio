@@ -11,6 +11,7 @@ export interface QaRequest {
     inline?: string;
     libraryId?: string;
     folderId?: string;
+    includeSubfolders?: boolean;
     documentIds?: string[];
     fileIds?: string[];
   };
@@ -332,6 +333,7 @@ export interface ChatMessage {
     inline?: MaterialRefInline;
     libraryId?: string;
     folderId?: string;
+    includeSubfolders?: boolean;
     documentIds?: string[];
     fileIds?: string[];
   } | null;
