@@ -2,6 +2,7 @@ import { Icon } from '@iconify/react';
 import { useRequest } from 'ahooks';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { DataTablePagination } from '@/components/data-table/pagination';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -798,7 +799,11 @@ const KnowledgeBasePage = () => {
                   <p className="text-destructive">{previewError}</p>
                 )}
                 {!previewLoading && !previewError && (
-                  <ReactMarkdown>{previewMarkdown}</ReactMarkdown>
+                  <div className="overflow-x-auto [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:px-3 [&_th]:py-2 [&_th]:text-left">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {previewMarkdown}
+                    </ReactMarkdown>
+                  </div>
                 )}
               </div>
             </CardContent>
