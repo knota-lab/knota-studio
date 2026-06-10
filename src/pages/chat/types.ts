@@ -1,4 +1,4 @@
-import type { ChatSessionDetail } from '@/api/knowledge-base';
+import type { ChatSessionDetail, QaCitation } from '@/api/knowledge-base';
 
 export interface ContentPart {
   createdAt: string;
@@ -24,6 +24,7 @@ export interface UiMessage {
   inlineText: string | undefined;
   knowledgeScopeLabel: string | undefined;
   phase: string | undefined;
+  citations: QaCitation[];
   fileIds: string[];
   fileNames: string[];
   createdAt: string;

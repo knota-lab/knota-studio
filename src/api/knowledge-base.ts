@@ -11,6 +11,7 @@ export interface QaRequest {
     inline?: string;
     libraryId?: string;
     folderId?: string;
+    knowledgeScopeLabel?: string;
     includeSubfolders?: boolean;
     documentIds?: string[];
     fileIds?: string[];
@@ -314,6 +315,7 @@ interface MaterialRefInline {
 
 interface TokenUsage {
   contentParts?: ContentPart[];
+  citations?: QaCitation[];
 }
 
 // ---- Chat Session Types ----
@@ -333,6 +335,7 @@ export interface ChatMessage {
     inline?: MaterialRefInline;
     libraryId?: string;
     folderId?: string;
+    knowledgeScopeLabel?: string;
     includeSubfolders?: boolean;
     documentIds?: string[];
     fileIds?: string[];

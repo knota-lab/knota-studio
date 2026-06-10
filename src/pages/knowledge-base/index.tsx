@@ -42,6 +42,72 @@ type Selection =
 
 const assetUrlPattern = /kb-asset:\/\/([^)]+)/g;
 
+const mimeLabelMap: Record<string, string> = {
+  'application/pdf': 'PDF',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
+    'DOCX',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation':
+    'PPTX',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'XLSX',
+  'text/markdown': 'Markdown',
+  'text/plain': '纯文本',
+  'image/png': 'PNG 图片',
+  'image/jpeg': 'JPEG 图片',
+  'image/webp': 'WEBP 图片',
+  'image/bmp': 'BMP 图片',
+  'image/tiff': 'TIFF 图片',
+};
+
+const mimeLabel = (mime?: string) =>
+  mime ? (mimeLabelMap[mime] ?? mime) : '未知';
+
+const extractQuotedField = (message: string, field: string) => {
+  const match = new RegExp(`${field}='([^']*)'`).exec(message);
+  return match?.[1];
+};
+
+const formatErrorSummary = (message?: string | null) => {
+  if (!message) return null;
+
+  const detectedMime = extractQuotedField(message, 'detectedMime');
+  const declaredMime = extractQuotedField(message, 'declaredMime');
+  const extensionMime = extractQuotedField(message, 'extensionMime');
+  const sourceName = extractQuotedField(message, 'sourceName');
+
+  if (detectedMime && (declaredMime || extensionMime)) {
+    return {
+      title: '文件类型不一致',
+      description:
+        '文件内容、上传声明或文件名后缀不一致。请确认文件没有被错误改名后重新上传。',
+      details: [
+        sourceName ? `文件名：${sourceName}` : undefined,
+        `实际内容：${mimeLabel(detectedMime)}`,
+        declaredMime ? `上传声明：${mimeLabel(declaredMime)}` : undefined,
+        extensionMime ? `文件后缀：${mimeLabel(extensionMime)}` : undefined,
+      ].filter(Boolean) as string[],
+    };
+  }
+
+  if (message.includes('MinerU returned HTTP')) {
+    return {
+      title: '文档解析服务返回错误',
+      description:
+        '解析服务未能处理该文件。请检查文件格式是否受支持，或查看原始错误定位解析服务返回内容。',
+      details: [],
+    };
+  }
+
+  if (message.includes('嵌入生成失败') || message.includes('embedding')) {
+    return {
+      title: '向量生成失败',
+      description: 'Embedding 服务不可用或请求失败，请检查向量模型服务状态。',
+      details: [],
+    };
+  }
+
+  return null;
+};
+
 const statusVariant = (status: string) => {
   if (status === 'ready') return 'default';
   if (status === 'error') return 'destructive';
@@ -109,6 +175,10 @@ const KnowledgeBasePage = () => {
   const [previewMarkdown, setPreviewMarkdown] = useState('');
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [errorTarget, setErrorTarget] = useState<KbDocument | null>(null);
+  const errorSummary = useMemo(
+    () => formatErrorSummary(errorTarget?.errorMessage),
+    [errorTarget?.errorMessage],
+  );
   const [documentPage, setDocumentPage] = useState(1);
   const [documentPageSize, setDocumentPageSize] = useState(30);
   const [documentTotal, setDocumentTotal] = useState(0);
@@ -821,9 +891,28 @@ const KnowledgeBasePage = () => {
           <DialogHeader>
             <DialogTitle>{errorTarget?.title ?? '错误详情'}</DialogTitle>
           </DialogHeader>
-          <pre className="max-h-[50vh] overflow-auto whitespace-pre-wrap rounded-md border bg-muted/40 p-3 text-sm text-destructive">
-            {errorTarget?.errorMessage}
-          </pre>
+          <div className="space-y-3">
+            {errorSummary && (
+              <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3">
+                <div className="text-sm font-medium text-destructive">
+                  {errorSummary.title}
+                </div>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {errorSummary.description}
+                </p>
+                {errorSummary.details.length > 0 && (
+                  <div className="mt-3 space-y-1 text-sm text-foreground">
+                    {errorSummary.details.map((detail) => (
+                      <div key={detail}>{detail}</div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            <pre className="max-h-[38vh] overflow-auto whitespace-pre-wrap rounded-md border bg-muted/40 p-3 text-sm text-destructive">
+              {errorTarget?.errorMessage}
+            </pre>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

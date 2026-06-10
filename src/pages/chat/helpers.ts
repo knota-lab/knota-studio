@@ -58,6 +58,7 @@ export const createPhaseLabelMap = (
 });
 
 export const buildKnowledgeScopeLabel = (refs: MaterialRefs, t: TFn) => {
+  if (refs?.knowledgeScopeLabel) return refs.knowledgeScopeLabel;
   if (refs?.folderId) {
     return refs.includeSubfolders
       ? t(

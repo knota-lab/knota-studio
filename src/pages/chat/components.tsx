@@ -270,6 +270,44 @@ export const AiMessage = memo(
             <Markdown remarkPlugins={remarkPlugins}>{msg.content}</Markdown>
           </div>
         )}
+        {msg.citations.length > 0 && (
+          <div className="mt-2 rounded-md border bg-muted/30 p-2">
+            <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+              <Icon icon="lucide:quote" className="size-3.5" />
+              {t('KbChat.citations.title', '引用来源')}
+            </div>
+            <div className="space-y-1.5">
+              {msg.citations.slice(0, 5).map((citation, idx) => (
+                <div
+                  key={`${citation.documentId}-${citation.chunkId ?? idx}`}
+                  className="rounded border bg-background/70 px-2 py-1.5 text-xs"
+                >
+                  <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground">
+                    <span className="font-mono">
+                      {t('KbChat.citations.document', '文档')}:{' '}
+                      {citation.documentId.slice(0, 8)}
+                    </span>
+                    {citation.chunkId && (
+                      <span className="font-mono">
+                        {t('KbChat.citations.chunk', '分块')}:{' '}
+                        {citation.chunkId.slice(0, 8)}
+                      </span>
+                    )}
+                    <span>
+                      {t('KbChat.citations.score', '相关度')}:{' '}
+                      {citation.score.toFixed(2)}
+                    </span>
+                  </div>
+                  {citation.content && (
+                    <div className="mt-1 line-clamp-2 text-muted-foreground">
+                      {citation.content}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   ),

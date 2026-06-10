@@ -5,7 +5,12 @@ import type { ChangeEvent } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { smallUpload } from '@/api/files';
-import type { ChatSession, QaPhase, QaStreamEvent } from '@/api/knowledge-base';
+import type {
+  ChatSession,
+  QaPhase,
+  QaStreamEvent,
+  QaStreamResponse,
+} from '@/api/knowledge-base';
 import {
   askQuestionStream,
   debugExportSession,
@@ -184,6 +189,7 @@ const KbChat = () => {
             inlineText,
             knowledgeScopeLabel: scopeLabel,
             phase: undefined,
+            citations: m.tokenUsage?.citations ?? [],
             fileIds: [],
             fileNames: [],
             createdAt: m.createdAt,
@@ -522,6 +528,7 @@ const KbChat = () => {
       inlineText,
       knowledgeScopeLabel: knowledgeScope?.label,
       phase: undefined,
+      citations: [],
       fileIds: attachedFiles.map((f) => f.id),
       fileNames: attachedFiles.map((f) => f.name),
       createdAt: new Date().toISOString(),
@@ -545,6 +552,7 @@ const KbChat = () => {
         inlineText: undefined,
         knowledgeScopeLabel: undefined,
         phase: undefined,
+        citations: [],
         fileIds: [],
         fileNames: [],
         createdAt: new Date().toISOString(),
@@ -566,6 +574,7 @@ const KbChat = () => {
       inline: inlineText,
       libraryId: knowledgeScope?.libraryId,
       folderId: knowledgeScope?.folderId,
+      knowledgeScopeLabel: knowledgeScope?.label,
       includeSubfolders: knowledgeScope?.includeSubfolders,
       fileIds:
         attachedFiles.length > 0 ? attachedFiles.map((f) => f.id) : undefined,
@@ -585,6 +594,7 @@ const KbChat = () => {
         useKnowledgeBase?: boolean;
         libraryId?: string;
         folderId?: string;
+        knowledgeScopeLabel?: string;
         includeSubfolders?: boolean;
         fileIds?: string[];
       };
@@ -794,6 +804,7 @@ const KbChat = () => {
               type: 'AnswerToken';
               data: { token: string };
             };
+            assistant.content += e.data.token;
             // Find last text part or create one
             const lastPart = assistant.parts[assistant.parts.length - 1];
             if (lastPart && lastPart.type === 'text') {
@@ -816,10 +827,11 @@ const KbChat = () => {
           Completed: (ev) => {
             const e = ev as {
               type: 'Completed';
-              data: { response: { sessionId: string } };
+              data: { response: QaStreamResponse };
             };
             setActiveSession(e.data.response.sessionId);
             assistant.loading = false;
+            assistant.citations = e.data.response.citations;
             setIsStreaming(false);
             abortRef.current = null;
             // Refresh sessions list since a new one might have been created
