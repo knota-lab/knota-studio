@@ -19,13 +19,24 @@ import {
   HoverCardTrigger,
 } from '@/components/ui/hover-card';
 import { DynamicIcon } from '@/components/ui/icon-picker';
-import { Separator } from '@/components/ui/separator';
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
+  Sidebar,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarHeader,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
+  SidebarProvider,
+  SidebarRail,
+  SidebarTrigger,
+} from '@/components/ui/sidebar';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { useI18n, useT } from '@/i18n';
 import { cn } from '@/lib/utils';
 import KbChat from '@/pages/chat';
@@ -34,14 +45,9 @@ import type { MergedMenuTreeResponse } from '@/types/api';
 
 // ─── Constants ──────────────────────────────────────────
 
-const sidebarExpandedWidth = 240;
-const sidebarCollapsedWidth = 64;
-const sidebarMinWidth = 180;
-const sidebarMaxWidth = 360;
 const chatPanelDefaultWidth = 480;
 const chatPanelMinWidth = 320;
 const chatPanelMaxWidth = 720;
-const mobileBreakpoint = 768;
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -67,9 +73,6 @@ const MainLayout = () => {
   const [collapsed = false, setCollapsed] = useLocalStorageState<boolean>(
     'knota-sidebar-collapsed',
   );
-  const [sidebarWidth, setSidebarWidth] = useState(sidebarExpandedWidth);
-  const [isResizing, setIsResizing] = useState(false);
-
   // Nav group expand state — auto-expand groups containing the active route
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
 
@@ -81,10 +84,6 @@ const MainLayout = () => {
   // Theme state
   const [darkMode = false, setDarkMode] =
     useLocalStorageState<boolean>('knota-theme-dark');
-
-  // Mobile state
-  const [isMobile, setIsMobile] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
 
   // Chat panel state
   const [chatOpen = false, setChatOpen] =
@@ -133,75 +132,17 @@ const MainLayout = () => {
     [chatWidth, setChatWidth],
   );
 
-  // Resize tracking
-  const isResizingRef = useRef(false);
-
   // Sync dark class on <html>
   useEffect(() => {
     document.documentElement.classList.toggle('dark', darkMode);
   }, [darkMode]);
 
-  // Detect mobile viewport
-  useEffect(() => {
-    const query = window.matchMedia(`(max-width: ${mobileBreakpoint - 1}px)`);
-    setIsMobile(query.matches);
-
-    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
-    query.addEventListener('change', handler);
-    return () => query.removeEventListener('change', handler);
-  }, []);
-
-  // Computed width
-  const actualWidth = collapsed ? sidebarCollapsedWidth : sidebarWidth;
-
   // Navigation
   const handleNavClick = useCallback(
     (path: string) => {
       navigate(path);
-      if (isMobile) setMobileOpen(false);
     },
-    [isMobile, navigate],
-  );
-
-  // Collapse toggle
-  const handleToggleCollapse = useCallback(() => {
-    setCollapsed(!collapsed);
-  }, [collapsed, setCollapsed]);
-
-  // Sidebar resizer
-  const handleResizerMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      setIsResizing(true);
-      isResizingRef.current = true;
-
-      document.body.classList.add('select-none');
-
-      const startX = e.clientX;
-      const startWidth = sidebarWidth;
-
-      const handleMouseMove = (moveEvent: MouseEvent) => {
-        if (!isResizingRef.current) return;
-        const delta = moveEvent.clientX - startX;
-        const nextWidth = Math.max(
-          sidebarMinWidth,
-          Math.min(sidebarMaxWidth, startWidth + delta),
-        );
-        setSidebarWidth(nextWidth);
-      };
-
-      const handleMouseUp = () => {
-        isResizingRef.current = false;
-        setIsResizing(false);
-        document.body.classList.remove('select-none');
-        document.removeEventListener('mousemove', handleMouseMove);
-        document.removeEventListener('mouseup', handleMouseUp);
-      };
-
-      document.addEventListener('mousemove', handleMouseMove);
-      document.addEventListener('mouseup', handleMouseUp);
-    },
-    [sidebarWidth],
+    [navigate],
   );
 
   // Active path detection
@@ -295,329 +236,216 @@ const MainLayout = () => {
     return current?.label ?? locale;
   }, [locale, locales]);
 
-  const isCollapsedDesktop = collapsed && !isMobile;
+  const sidebarOpen = !collapsed;
 
   return (
     <TooltipProvider>
-      <ForcedNotificationModal />
-      <div className="flex h-screen overflow-hidden bg-background">
-        {/* ─── Mobile backdrop ─── */}
-        {isMobile && mobileOpen && (
-          <button
-            type="button"
-            className="fixed inset-0 z-40 bg-black/50"
-            onClick={() => setMobileOpen(false)}
-            aria-label={t('Layout.header.toggleMenu', '菜单')}
-          />
-        )}
-
-        {/* ─── Sidebar ─── */}
-        <aside
-          className={cn(
-            'relative flex flex-col border-r bg-card',
-            isMobile
-              ? cn(
-                  'fixed inset-y-0 left-0 z-50 transition-transform duration-200',
-                  mobileOpen ? 'translate-x-0' : '-translate-x-full',
-                )
-              : cn(
-                  'shrink-0',
-                  !isResizing && 'transition-[width] duration-200 ease-in-out',
-                ),
-          )}
-          style={{
-            width: isMobile ? sidebarExpandedWidth : actualWidth,
-          }}
-        >
-          {/* Logo */}
-          <div className="flex h-14 shrink-0 items-center px-4">
-            {isCollapsedDesktop ? (
-              <span className="text-xl font-bold text-primary">K</span>
-            ) : (
-              <span className="text-xl font-bold text-primary">Knota</span>
-            )}
-          </div>
-
-          {/* Navigation items */}
-          <nav className="flex-1 space-y-1 overflow-y-auto p-2">
-            {/* Static entries (dashboard etc.) */}
-            {(() => {
-              const entry = staticEntry;
-              const label = t('Layout.sidebar.dashboard', '仪表盘');
-              const active = isActive(entry.path);
-
-              const itemClassName = cn(
-                'flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
-                active
-                  ? 'bg-primary/10 text-primary'
-                  : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
-                isCollapsedDesktop && 'justify-center px-2',
-              );
-
-              if (isCollapsedDesktop) {
-                return (
-                  <HoverCard key={entry.key} openDelay={0} closeDelay={100}>
-                    <HoverCardTrigger asChild>
-                      <button
-                        type="button"
-                        className={itemClassName}
-                        onClick={() => handleNavClick(entry.path)}
-                      >
-                        <DynamicIcon
-                          name={entry.icon}
-                          className="size-5 shrink-0"
-                        />
-                      </button>
-                    </HoverCardTrigger>
-                    <HoverCardContent side="right" className="w-auto p-2">
-                      <span className="text-sm font-medium">{label}</span>
-                    </HoverCardContent>
-                  </HoverCard>
-                );
-              }
-
-              return (
-                <button
-                  key={entry.key}
-                  type="button"
-                  className={itemClassName}
-                  onClick={() => handleNavClick(entry.path)}
+      <SidebarProvider
+        open={sidebarOpen}
+        onOpenChange={(open) => setCollapsed(!open)}
+        className="h-screen min-h-0 overflow-hidden bg-background"
+      >
+        <ForcedNotificationModal />
+        <Sidebar collapsible="icon">
+          <SidebarHeader>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  size="lg"
+                  tooltip="Knota"
+                  onClick={() => handleNavClick('/')}
                 >
-                  <DynamicIcon name={entry.icon} className="size-5 shrink-0" />
-                  <span className="truncate">{label}</span>
-                </button>
-              );
-            })()}
+                  <span className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
+                    K
+                  </span>
+                  <span className="truncate text-xl">Knota</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarHeader>
+          <SidebarContent>
+            <SidebarGroup>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      isActive={isActive(staticEntry.path)}
+                      tooltip={t('Layout.sidebar.dashboard', '仪表盘')}
+                      onClick={() => handleNavClick(staticEntry.path)}
+                    >
+                      <DynamicIcon
+                        name={staticEntry.icon}
+                        className="size-4 shrink-0"
+                      />
+                      <span>{t('Layout.sidebar.dashboard', '仪表盘')}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                  {menuTree?.map((menuItem) => {
+                    const hasChildren = menuItem.children.length > 0;
+                    const expanded = expandedKeys.has(menuItem.id);
+                    const isDirectlyActive = menuItem.path
+                      ? isActive(menuItem.path)
+                      : false;
+                    const isChildActive = hasChildren
+                      ? menuItem.children.some((child) =>
+                          child.path ? isActive(child.path) : false,
+                        )
+                      : false;
+                    const active = isDirectlyActive || isChildActive;
 
-            {/* Dynamic menu entries */}
-            {menuTree?.map((menuItem) => {
-              const hasChildren = menuItem.children.length > 0;
-              const expanded = expandedKeys.has(menuItem.id);
-              const isDirectlyActive = menuItem.path
-                ? isActive(menuItem.path)
-                : false;
-              const isChildActive = hasChildren
-                ? menuItem.children.some((c) =>
-                    c.path ? isActive(c.path) : false,
-                  )
-                : false;
-              const active = isDirectlyActive || isChildActive;
-
-              const itemClassName = cn(
-                'flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
-                active
-                  ? 'bg-primary/10 text-primary'
-                  : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
-                isCollapsedDesktop && 'justify-center px-2',
-              );
-
-              const handleClick = hasChildren
-                ? () => toggleGroup(menuItem.id)
-                : () => menuItem.path && handleNavClick(menuItem.path);
-
-              if (isCollapsedDesktop) {
-                return (
-                  <HoverCard key={menuItem.id} openDelay={0} closeDelay={150}>
-                    <HoverCardTrigger asChild>
-                      <button
-                        type="button"
-                        className={itemClassName}
-                        onClick={handleClick}
-                      >
-                        {menuItem.icon ? (
-                          <DynamicIcon
-                            name={menuItem.icon}
-                            className="size-5 shrink-0"
-                          />
-                        ) : (
-                          <Icon
-                            icon="lucide:settings"
-                            className="size-5 shrink-0"
-                          />
-                        )}
-                      </button>
-                    </HoverCardTrigger>
-                    <HoverCardContent side="right" className="w-auto p-2">
-                      {hasChildren ? (
-                        <div className="space-y-0.5">
-                          <p className="mb-1 text-xs font-semibold text-foreground">
-                            {menuItem.name}
-                          </p>
-                          {menuItem.children.map((child) => {
-                            const childActive = child.path
-                              ? isActive(child.path)
-                              : false;
-                            return (
-                              <button
-                                key={child.id}
-                                type="button"
-                                className={cn(
-                                  'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors',
-                                  childActive
-                                    ? 'bg-primary/10 text-primary font-medium'
-                                    : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
-                                )}
-                                onClick={() =>
-                                  child.path && handleNavClick(child.path)
-                                }
-                              >
-                                {child.icon ? (
+                    if (hasChildren && !sidebarOpen) {
+                      return (
+                        <SidebarMenuItem key={menuItem.id}>
+                          <HoverCard openDelay={80} closeDelay={120}>
+                            <HoverCardTrigger asChild>
+                              <SidebarMenuButton isActive={active}>
+                                {menuItem.icon ? (
                                   <DynamicIcon
-                                    name={child.icon}
+                                    name={menuItem.icon}
                                     className="size-4 shrink-0"
                                   />
                                 ) : (
-                                  <span className="size-4 shrink-0" />
+                                  <Icon
+                                    icon="lucide:settings"
+                                    className="size-4 shrink-0"
+                                  />
                                 )}
-                                <span className="whitespace-nowrap">
-                                  {child.name}
-                                </span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <span className="text-sm font-medium">
-                          {menuItem.name}
-                        </span>
-                      )}
-                    </HoverCardContent>
-                  </HoverCard>
-                );
-              }
+                                <span>{menuItem.name}</span>
+                              </SidebarMenuButton>
+                            </HoverCardTrigger>
+                            <HoverCardContent
+                              side="right"
+                              align="start"
+                              className="w-56 p-2"
+                            >
+                              <div className="mb-1 px-2 py-1 text-xs font-medium text-muted-foreground">
+                                {menuItem.name}
+                              </div>
+                              <div className="space-y-1">
+                                {menuItem.children.map((child) => {
+                                  const childActive = child.path
+                                    ? isActive(child.path)
+                                    : false;
+                                  return (
+                                    <button
+                                      key={child.id}
+                                      type="button"
+                                      className={cn(
+                                        'flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors',
+                                        childActive
+                                          ? 'bg-primary/10 font-medium text-primary'
+                                          : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+                                      )}
+                                      onClick={() =>
+                                        child.path && handleNavClick(child.path)
+                                      }
+                                    >
+                                      {child.icon ? (
+                                        <DynamicIcon
+                                          name={child.icon}
+                                          className="size-4 shrink-0"
+                                        />
+                                      ) : (
+                                        <span className="size-4 shrink-0" />
+                                      )}
+                                      <span className="truncate">
+                                        {child.name}
+                                      </span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </HoverCardContent>
+                          </HoverCard>
+                        </SidebarMenuItem>
+                      );
+                    }
 
-              return (
-                <div key={menuItem.id}>
-                  <button
-                    type="button"
-                    className={itemClassName}
-                    onClick={handleClick}
-                  >
-                    {menuItem.icon ? (
-                      <DynamicIcon
-                        name={menuItem.icon}
-                        className="size-5 shrink-0"
-                      />
-                    ) : (
-                      <Icon
-                        icon="lucide:settings"
-                        className="size-5 shrink-0"
-                      />
-                    )}
-                    <span className="truncate">{menuItem.name}</span>
-                    {hasChildren && (
-                      <Icon
-                        icon="lucide:chevron-down"
-                        className={cn(
-                          'ml-auto size-4 shrink-0 transition-transform duration-200',
-                          !expanded && '-rotate-90',
-                        )}
-                      />
-                    )}
-                  </button>
-                  {hasChildren && expanded && (
-                    <div className="ml-4 mt-1 space-y-1 border-l pl-2">
-                      {menuItem.children.map((child) => {
-                        const childActive = child.path
-                          ? isActive(child.path)
-                          : false;
-
-                        return (
-                          <button
-                            key={child.id}
-                            type="button"
-                            className={cn(
-                              'flex w-full items-center gap-3 rounded-md px-3 py-1.5 text-sm transition-colors',
-                              childActive
-                                ? 'bg-primary/10 text-primary font-medium'
-                                : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
-                            )}
-                            onClick={() =>
-                              child.path && handleNavClick(child.path)
+                    return (
+                      <SidebarMenuItem key={menuItem.id}>
+                        <SidebarMenuButton
+                          isActive={active}
+                          tooltip={hasChildren ? undefined : menuItem.name}
+                          onClick={() => {
+                            if (hasChildren) {
+                              toggleGroup(menuItem.id);
+                              return;
                             }
-                          >
-                            {child.icon ? (
-                              <DynamicIcon
-                                name={child.icon}
-                                className="size-4 shrink-0"
-                              />
-                            ) : (
-                              <span className="size-4 shrink-0" />
-                            )}
-                            <span className="truncate">{child.name}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </nav>
+                            if (menuItem.path) handleNavClick(menuItem.path);
+                          }}
+                        >
+                          {menuItem.icon ? (
+                            <DynamicIcon
+                              name={menuItem.icon}
+                              className="size-4 shrink-0"
+                            />
+                          ) : (
+                            <Icon
+                              icon="lucide:settings"
+                              className="size-4 shrink-0"
+                            />
+                          )}
+                          <span>{menuItem.name}</span>
+                          {hasChildren && (
+                            <Icon
+                              icon="lucide:chevron-down"
+                              className={cn(
+                                'ml-auto size-4 shrink-0 transition-transform',
+                                !expanded && '-rotate-90',
+                              )}
+                            />
+                          )}
+                        </SidebarMenuButton>
+                        {hasChildren && expanded && (
+                          <SidebarMenuSub>
+                            {menuItem.children.map((child) => {
+                              const childActive = child.path
+                                ? isActive(child.path)
+                                : false;
+                              return (
+                                <SidebarMenuSubItem key={child.id}>
+                                  <SidebarMenuSubButton
+                                    asChild
+                                    isActive={childActive}
+                                  >
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        child.path && handleNavClick(child.path)
+                                      }
+                                    >
+                                      {child.icon ? (
+                                        <DynamicIcon
+                                          name={child.icon}
+                                          className="size-4 shrink-0"
+                                        />
+                                      ) : (
+                                        <span className="size-4 shrink-0" />
+                                      )}
+                                      <span>{child.name}</span>
+                                    </button>
+                                  </SidebarMenuSubButton>
+                                </SidebarMenuSubItem>
+                              );
+                            })}
+                          </SidebarMenuSub>
+                        )}
+                      </SidebarMenuItem>
+                    );
+                  })}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          </SidebarContent>
+          <SidebarRail />
+        </Sidebar>
 
-          {/* Collapse toggle (desktop only) */}
-          {!isMobile && (
-            <>
-              <Separator />
-              <div className="shrink-0 p-2">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="w-full"
-                      onClick={handleToggleCollapse}
-                    >
-                      {collapsed ? (
-                        <Icon icon="lucide:chevrons-right" className="size-4" />
-                      ) : (
-                        <>
-                          <Icon
-                            icon="lucide:chevrons-left"
-                            className="size-4"
-                          />
-                          <span className="ml-2 text-xs">
-                            {t('Layout.sidebar.collapse', '收起侧边栏')}
-                          </span>
-                        </>
-                      )}
-                    </Button>
-                  </TooltipTrigger>
-                  {collapsed && (
-                    <TooltipContent side="right">
-                      {t('Layout.sidebar.expand', '展开侧边栏')}
-                    </TooltipContent>
-                  )}
-                </Tooltip>
-              </div>
-            </>
-          )}
-
-          {/* Resizer handle (desktop, expanded only) */}
-          {!collapsed && !isMobile && (
-            // biome-ignore lint/a11y/noStaticElementInteractions: drag handle is mouse-only
-            <div
-              className="absolute inset-y-0 right-0 w-1 cursor-col-resize hover:bg-primary/30 active:bg-primary/50"
-              onMouseDown={handleResizerMouseDown}
-            />
-          )}
-        </aside>
-
-        {/* ─── Main content area ─── */}
-        <div className="flex flex-1 flex-col overflow-hidden">
+        <SidebarInset className="min-w-0 overflow-hidden">
           {/* Header */}
           <header className="flex h-14 shrink-0 items-center gap-4 border-b bg-card px-4">
-            {/* Mobile hamburger */}
-            {isMobile && (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setMobileOpen(true)}
-                aria-label={t('Layout.header.toggleMenu', '菜单')}
-              >
-                <Icon icon="lucide:menu" className="size-5" />
-              </Button>
-            )}
+            <SidebarTrigger
+              aria-label={t('Layout.header.toggleMenu', '菜单')}
+            />
 
             {/* Breadcrumb */}
             <span className="text-sm font-medium text-foreground">
@@ -715,7 +543,7 @@ const MainLayout = () => {
           <main className="flex-1 overflow-hidden p-6">
             <Outlet />
           </main>
-        </div>
+        </SidebarInset>
 
         {/* ─── Chat Panel ─── */}
         {chatOpen && (
@@ -739,7 +567,7 @@ const MainLayout = () => {
             </div>
           </>
         )}
-      </div>
+      </SidebarProvider>
     </TooltipProvider>
   );
 };

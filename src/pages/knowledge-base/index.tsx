@@ -4,7 +4,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { useLocation, useNavigate } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
-import { DataTablePagination } from '@/components/data-table/pagination';
+import {
+  buildColumns,
+  ProTable,
+  type ProTableColumnDef,
+  type ProTableRef,
+} from '@/components/pro-table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -16,6 +21,21 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuAction,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
+  SidebarProvider,
+} from '@/components/ui/sidebar';
 import { cn } from '@/lib/utils';
 import { toast } from '@/utils/toast';
 import {
@@ -77,8 +97,57 @@ const mimeLabelMap: Record<string, string> = {
   'image/tiff': 'TIFF 图片',
 };
 
+const supportedUploadExtensions = [
+  '.pdf',
+  '.docx',
+  '.pptx',
+  '.xlsx',
+  '.md',
+  '.markdown',
+  '.txt',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.webp',
+  '.bmp',
+  '.tif',
+  '.tiff',
+];
+
+const supportedUploadAccept = [
+  ...supportedUploadExtensions,
+  ...Object.keys(mimeLabelMap),
+].join(',');
+
+const mimeByExtension: Record<string, string> = {
+  pdf: 'application/pdf',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  md: 'text/markdown',
+  markdown: 'text/markdown',
+  txt: 'text/plain',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  webp: 'image/webp',
+  bmp: 'image/bmp',
+  tif: 'image/tiff',
+  tiff: 'image/tiff',
+};
+
 const mimeLabel = (mime?: string) =>
   mime ? (mimeLabelMap[mime] ?? mime) : '未知';
+
+const inferSupportedUploadMime = (file: File) => {
+  const extension = file.name.includes('.')
+    ? file.name.split('.').pop()?.toLowerCase()
+    : undefined;
+  if (extension && mimeByExtension[extension]) {
+    return mimeByExtension[extension];
+  }
+  return file.type && mimeLabelMap[file.type] ? file.type : null;
+};
 
 const extractQuotedField = (message: string, field: string) => {
   const match = new RegExp(`${field}='([^']*)'`).exec(message);
@@ -168,12 +237,21 @@ const documentProgressLabel = (document: KbDocument) => {
   return null;
 };
 
-const documentProgressMessage = (document: KbDocument) =>
-  document.indexingProgress?.message ??
-  documentProgressLabel(document) ??
-  statusMeta(document.status).description;
+const documentProgressMessage = (document: KbDocument) => {
+  if (!['pending', 'indexing', 'error'].includes(document.status)) {
+    return statusMeta(document.status).description;
+  }
+  return (
+    document.indexingProgress?.message ??
+    documentProgressLabel(document) ??
+    statusMeta(document.status).description
+  );
+};
 
 const documentProgressPercent = (document: KbDocument) => {
+  if (!['pending', 'indexing'].includes(document.status)) {
+    return null;
+  }
   const current = document.indexingProgress?.current;
   const total = document.indexingProgress?.total;
   if (typeof current !== 'number' || typeof total !== 'number' || total <= 0) {
@@ -267,6 +345,7 @@ const buildLineExcerpt = (
 
 const KnowledgeBasePage = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const tableRef = useRef<ProTableRef>(null);
   const location = useLocation();
   const navigate = useNavigate();
   const [libraries, setLibraries] = useState<KbLibrary[]>([]);
@@ -283,9 +362,6 @@ const KnowledgeBasePage = () => {
     () => formatErrorSummary(errorTarget?.errorMessage),
     [errorTarget?.errorMessage],
   );
-  const [documentPage, setDocumentPage] = useState(1);
-  const [documentPageSize, setDocumentPageSize] = useState(30);
-  const [documentTotal, setDocumentTotal] = useState(0);
   const [reindexingIds, setReindexingIds] = useState<Set<string>>(
     () => new Set(),
   );
@@ -390,31 +466,38 @@ const KnowledgeBasePage = () => {
     () => documents.filter((document) => document.status === 'error'),
     [documents],
   );
+  const selectedLibraryId = selection?.libraryId;
+  const selectedFolderId = selection?.folderId;
+  const documentTableParams = useMemo(
+    () => ({
+      libraryId: selectedLibraryId,
+      folderId: selectedFolderId,
+    }),
+    [selectedFolderId, selectedLibraryId],
+  );
 
-  const { loading, runAsync: loadDocuments } = useRequest(
-    async () => {
+  const loadDocuments = useCallback(
+    async (params: { page: number; pageSize: number }) => {
       if (!selection) {
-        return null;
+        setDocuments([]);
+        return {
+          items: [],
+          totalItems: 0,
+          totalPages: 0,
+          page: params.page,
+          pageSize: params.pageSize,
+        };
       }
-      return listDocuments({
-        page: documentPage,
-        pageSize: documentPageSize,
+      const data = await listDocuments({
+        page: params.page,
+        pageSize: params.pageSize,
         libraryId: selection.libraryId,
         folderId: selection.folderId,
       });
+      setDocuments(data.items);
+      return data;
     },
-    {
-      manual: true,
-      onSuccess: (data) => {
-        if (!data) {
-          setDocuments([]);
-          setDocumentTotal(0);
-          return;
-        }
-        setDocuments(data.items);
-        setDocumentTotal(data.totalItems);
-      },
-    },
+    [selection],
   );
 
   useEffect(() => {
@@ -430,22 +513,18 @@ const KnowledgeBasePage = () => {
   }, [loadFolders, selection?.libraryId]);
 
   useEffect(() => {
-    void loadDocuments();
-  }, [loadDocuments]);
-
-  useEffect(() => {
     if (!hasIndexingDocuments) return;
     const timer = window.setInterval(() => {
-      void loadDocuments();
+      tableRef.current?.refresh();
     }, 3000);
     return () => window.clearInterval(timer);
-  }, [hasIndexingDocuments, loadDocuments]);
+  }, [hasIndexingDocuments]);
 
   const refreshAll = useCallback(async () => {
     await loadLibraries();
     if (selection?.libraryId) await loadFolders(selection.libraryId);
-    await loadDocuments();
-  }, [loadDocuments, loadFolders, loadLibraries, selection?.libraryId]);
+    tableRef.current?.refresh();
+  }, [loadFolders, loadLibraries, selection?.libraryId]);
 
   const handleCreateLibrary = useCallback(async () => {
     const name = libraryName.trim();
@@ -454,7 +533,6 @@ const KnowledgeBasePage = () => {
     setLibraryName('');
     toast.success('知识库已创建');
     await loadLibraries();
-    setDocumentPage(1);
     setSelection({ type: 'library', libraryId: library.id });
   }, [libraryName, loadLibraries]);
 
@@ -476,15 +554,19 @@ const KnowledgeBasePage = () => {
     async (files: FileList) => {
       if (!selection) return;
       for (const file of Array.from(files)) {
+        const mimeType = inferSupportedUploadMime(file);
+        if (!mimeType) {
+          throw new Error(`不支持的文件格式：${file.name}`);
+        }
         const uploaded = await uploadFile(file, {
-          mimeTypeHint: file.type || undefined,
+          mimeTypeHint: mimeType,
         });
         await createDocument({
           title: file.name,
           libraryId: selection.libraryId,
           folderId: selection.folderId,
           fileId: uploaded.id,
-          sourceType: file.type || undefined,
+          sourceType: mimeType,
           scope: 'tenant',
         });
       }
@@ -493,8 +575,12 @@ const KnowledgeBasePage = () => {
       manual: true,
       onSuccess: () => {
         toast.success('已提交入库任务');
-        setDocumentPage(1);
-        if (documentPage === 1) void loadDocuments();
+        tableRef.current?.refresh();
+      },
+      onError: (error) => {
+        toast.assertNotApiError.error(
+          error instanceof Error ? error.message : '上传入库失败',
+        );
       },
       onFinally: () => {
         if (fileInputRef.current) fileInputRef.current.value = '';
@@ -505,6 +591,16 @@ const KnowledgeBasePage = () => {
   const handleUpload = useCallback(
     (files: FileList | null) => {
       if (!selection || !files || files.length === 0) return;
+      const unsupported = Array.from(files).filter(
+        (file) => !inferSupportedUploadMime(file),
+      );
+      if (unsupported.length > 0) {
+        toast.assertNotApiError.error(
+          `不支持的文件格式：${unsupported[0]?.name ?? '未知文件'}`,
+        );
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        return;
+      }
       void uploadDocuments(files);
     },
     [selection, uploadDocuments],
@@ -593,31 +689,196 @@ const KnowledgeBasePage = () => {
     });
   }, [openPreview, previewQuery]);
 
-  const handleDeleteDocument = useCallback(
-    async (document: KbDocument) => {
-      await deleteDocument(document.id);
-      toast.success('文档已删除');
-      await loadDocuments();
-    },
-    [loadDocuments],
-  );
+  const handleDeleteDocument = useCallback(async (document: KbDocument) => {
+    await deleteDocument(document.id);
+    toast.success('文档已删除');
+    tableRef.current?.refresh();
+  }, []);
 
-  const handleReindex = useCallback(
-    async (document: KbDocument) => {
-      setReindexingIds((current) => new Set(current).add(document.id));
-      try {
-        await reindexDocument(document.id);
-        toast.success('已提交重新入库');
-        await loadDocuments();
-      } finally {
-        setReindexingIds((current) => {
-          const next = new Set(current);
-          next.delete(document.id);
-          return next;
-        });
-      }
-    },
-    [loadDocuments],
+  const handleReindex = useCallback(async (document: KbDocument) => {
+    setReindexingIds((current) => new Set(current).add(document.id));
+    try {
+      await reindexDocument(document.id);
+      toast.success('已提交重新入库');
+      tableRef.current?.refresh();
+    } finally {
+      setReindexingIds((current) => {
+        const next = new Set(current);
+        next.delete(document.id);
+        return next;
+      });
+    }
+  }, []);
+
+  const documentColumns = useMemo(
+    () =>
+      buildColumns<KbDocument>(
+        [
+          {
+            key: 'title',
+            label: '文档',
+            size: 420,
+            minSize: 360,
+            ellipsis: false,
+            showOverflowTooltip: false,
+          },
+          {
+            key: 'status',
+            label: '状态',
+            size: 120,
+            align: 'center',
+            ellipsis: false,
+          },
+          {
+            key: 'chunkCount',
+            label: '分块',
+            size: 120,
+            align: 'center',
+            ellipsis: false,
+          },
+          {
+            key: 'updatedAt',
+            label: '更新时间',
+            size: 180,
+            align: 'center',
+            ellipsis: false,
+          },
+          {
+            key: 'actions',
+            label: '操作',
+            size: 290,
+            align: 'center',
+            ellipsis: false,
+            enableResizing: false,
+          },
+        ],
+        {
+          title: ({ row }) => {
+            const document = row.original;
+            const progressPercent = documentProgressPercent(document);
+            const isProcessing = ['pending', 'indexing'].includes(
+              document.status,
+            );
+            return (
+              <div className="min-w-0">
+                <div className="truncate font-medium">{document.title}</div>
+                <div className="mt-0.5 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+                  <span className="truncate">
+                    {documentProgressMessage(document)}
+                  </span>
+                  {document.errorMessage && (
+                    <button
+                      type="button"
+                      className="shrink-0 text-destructive underline-offset-2 hover:underline"
+                      onClick={() => setErrorTarget(document)}
+                    >
+                      查看错误
+                    </button>
+                  )}
+                </div>
+                {progressPercent !== null && isProcessing && (
+                  <div className="mt-1 flex items-center gap-2">
+                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full bg-blue-500 transition-all"
+                        style={{ width: `${progressPercent}%` }}
+                      />
+                    </div>
+                    <span className="w-10 text-right text-[11px] text-muted-foreground">
+                      {progressPercent}%
+                    </span>
+                  </div>
+                )}
+              </div>
+            );
+          },
+          status: ({ row }) => {
+            const document = row.original;
+            const meta = statusMeta(document.status);
+            return (
+              <Badge
+                variant={statusVariant(document.status)}
+                className={cn('border', meta.tone)}
+              >
+                <span className="inline-flex items-center gap-1">
+                  <Icon
+                    icon={meta.icon}
+                    className={cn(
+                      'size-3',
+                      document.status === 'indexing' && 'animate-spin',
+                    )}
+                  />
+                  {meta.label}
+                </span>
+              </Badge>
+            );
+          },
+          chunkCount: ({ row }) => {
+            const document = row.original;
+            return (
+              <div className="leading-tight">
+                <div>{document.chunkCount}</div>
+                {document.totalTokens > 0 && (
+                  <div className="text-[11px] text-muted-foreground">
+                    {document.totalTokens} tokens
+                  </div>
+                )}
+              </div>
+            );
+          },
+          updatedAt: ({ row }) =>
+            new Date(row.original.updatedAt).toLocaleString(),
+          actions: ({ row }) => {
+            const document = row.original;
+            const isProcessing = ['pending', 'indexing'].includes(
+              document.status,
+            );
+            const isReindexing = reindexingIds.has(document.id);
+            return (
+              <div className="flex justify-center gap-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  disabled={document.status !== 'ready'}
+                  onClick={() => void handlePreview(document)}
+                >
+                  预览
+                </Button>
+                {document.status === 'error' && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => setErrorTarget(document)}
+                  >
+                    错误
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  variant={document.status === 'error' ? 'secondary' : 'ghost'}
+                  size="xs"
+                  disabled={isProcessing || isReindexing}
+                  onClick={() => void handleReindex(document)}
+                >
+                  {isReindexing ? '提交中' : '重新入库'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  disabled={isReindexing}
+                  onClick={() => void handleDeleteDocument(document)}
+                >
+                  删除
+                </Button>
+              </div>
+            );
+          },
+        },
+      ) as ProTableColumnDef<KbDocument>[],
+    [handleDeleteDocument, handlePreview, handleReindex, reindexingIds],
   );
 
   const renderFolders = (
@@ -628,58 +889,53 @@ const KnowledgeBasePage = () => {
     return items.map((folder) => {
       const selected = selection?.folderId === folder.id;
       return (
-        <div key={folder.id}>
-          <div
-            className="flex items-center gap-1"
-            style={{ paddingLeft: `${depth * 16}px` }}
-          >
-            <Button
+        <SidebarMenuSubItem key={folder.id}>
+          <SidebarMenuSubButton asChild isActive={selected}>
+            <button
               type="button"
-              variant={selected ? 'secondary' : 'ghost'}
-              size="sm"
-              className="min-w-0 flex-1 justify-start"
-              onClick={() => {
-                setDocumentPage(1);
+              style={depth > 0 ? { paddingLeft: 8 + depth * 12 } : undefined}
+              onClick={() =>
                 setSelection({
                   type: 'folder',
                   libraryId: folder.libraryId,
                   folderId: folder.id,
-                });
-              }}
+                })
+              }
             >
               <Icon icon="lucide:folder" className="mr-2 size-4 shrink-0" />
               <span className="truncate">{folder.name}</span>
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              onClick={async () => {
-                await deleteFolder(folder.id);
-                toast.success('目录已删除');
-                await loadFolders(folder.libraryId);
-              }}
-            >
-              <Icon icon="lucide:trash-2" className="size-4" />
-            </Button>
-          </div>
-          {renderFolders(folder.id, depth + 1)}
-        </div>
+            </button>
+          </SidebarMenuSubButton>
+          <SidebarMenuAction
+            type="button"
+            showOnHover
+            onClick={async () => {
+              await deleteFolder(folder.id);
+              toast.success('目录已删除');
+              await loadFolders(folder.libraryId);
+            }}
+          >
+            <Icon icon="lucide:trash-2" className="size-4" />
+          </SidebarMenuAction>
+          {folderChildren.has(folder.id) && (
+            <SidebarMenuSub>
+              {renderFolders(folder.id, depth + 1)}
+            </SidebarMenuSub>
+          )}
+        </SidebarMenuSubItem>
       );
     });
   };
 
   return (
-    <div className="flex h-full min-h-0 gap-4 p-4">
-      <aside className="flex w-80 shrink-0 flex-col gap-4">
-        <Card className="min-h-0 flex-1">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
+    <div className="flex h-full min-h-0 gap-4">
+      <SidebarProvider defaultOpen className="h-full min-h-0 w-80 shrink-0">
+        <Sidebar collapsible="none" className="w-full rounded-lg border">
+          <SidebarHeader className="gap-3 p-4">
+            <div className="flex items-center gap-2 text-base font-semibold">
               <Icon icon="lucide:library" className="size-4" />
               知识库
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="flex min-h-0 flex-col gap-3">
+            </div>
             <div className="flex gap-2">
               <Input
                 value={libraryName}
@@ -693,39 +949,45 @@ const KnowledgeBasePage = () => {
                 <Icon icon="lucide:plus" className="size-4" />
               </Button>
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              {libraries.map((library) => {
-                const selected =
-                  selection?.libraryId === library.id && !selection.folderId;
-                return (
-                  <div key={library.id} className="mb-1">
-                    <Button
-                      type="button"
-                      variant={selected ? 'secondary' : 'ghost'}
-                      size="sm"
-                      className="w-full justify-start"
-                      onClick={() => {
-                        setDocumentPage(1);
-                        setSelection({
-                          type: 'library',
-                          libraryId: library.id,
-                        });
-                      }}
-                    >
-                      <Icon
-                        icon="lucide:library"
-                        className="mr-2 size-4 shrink-0"
-                      />
-                      <span className="truncate">{library.name}</span>
-                    </Button>
-                    {selection?.libraryId === library.id && renderFolders(null)}
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
-      </aside>
+          </SidebarHeader>
+          <SidebarContent>
+            <SidebarGroup>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {libraries.map((library) => {
+                    const selected =
+                      selection?.libraryId === library.id &&
+                      !selection.folderId;
+                    return (
+                      <SidebarMenuItem key={library.id}>
+                        <SidebarMenuButton
+                          isActive={selected}
+                          tooltip={library.name}
+                          onClick={() =>
+                            setSelection({
+                              type: 'library',
+                              libraryId: library.id,
+                            })
+                          }
+                        >
+                          <Icon
+                            icon="lucide:library"
+                            className="size-4 shrink-0"
+                          />
+                          <span>{library.name}</span>
+                        </SidebarMenuButton>
+                        {selection?.libraryId === library.id && (
+                          <SidebarMenuSub>{renderFolders(null)}</SidebarMenuSub>
+                        )}
+                      </SidebarMenuItem>
+                    );
+                  })}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          </SidebarContent>
+        </Sidebar>
+      </SidebarProvider>
 
       <main className="flex min-w-0 flex-1 flex-col gap-4">
         <Card>
@@ -783,6 +1045,7 @@ const KnowledgeBasePage = () => {
                 <input
                   ref={fileInputRef}
                   type="file"
+                  accept={supportedUploadAccept}
                   multiple
                   className="hidden"
                   onChange={(event) => void handleUpload(event.target.files)}
@@ -910,179 +1173,20 @@ const KnowledgeBasePage = () => {
                 )}
               </div>
             )}
-            <div className="overflow-hidden rounded-md border">
-              <table className="w-full table-fixed text-sm">
-                <thead className="bg-muted/60 text-left">
-                  <tr>
-                    <th className="w-[36%] px-3 py-2 font-medium">文档</th>
-                    <th className="w-28 px-3 py-2 text-center font-medium">
-                      状态
-                    </th>
-                    <th className="w-28 px-3 py-2 font-medium">分块</th>
-                    <th className="w-44 px-3 py-2 text-center font-medium">
-                      更新时间
-                    </th>
-                    <th className="w-72 px-3 py-2 text-center font-medium">
-                      操作
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {documents.map((document) => {
-                    const meta = statusMeta(document.status);
-                    const isProcessing = ['pending', 'indexing'].includes(
-                      document.status,
-                    );
-                    const isReindexing = reindexingIds.has(document.id);
-                    const progressPercent = documentProgressPercent(document);
-                    return (
-                      <tr key={document.id} className="border-t">
-                        <td className="min-w-0 px-3 py-2">
-                          <div className="flex min-w-0 items-center gap-2">
-                            <Icon
-                              icon="lucide:file-text"
-                              className="size-4 shrink-0 text-muted-foreground"
-                            />
-                            <div className="min-w-0">
-                              <div className="truncate font-medium">
-                                {document.title}
-                              </div>
-                              <div className="mt-0.5 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-                                <span className="truncate">
-                                  {documentProgressMessage(document)}
-                                </span>
-                                {document.errorMessage && (
-                                  <button
-                                    type="button"
-                                    className="shrink-0 text-destructive underline-offset-2 hover:underline"
-                                    onClick={() => setErrorTarget(document)}
-                                  >
-                                    查看错误
-                                  </button>
-                                )}
-                              </div>
-                              {progressPercent !== null && isProcessing && (
-                                <div className="mt-1 flex items-center gap-2">
-                                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-                                    <div
-                                      className="h-full rounded-full bg-blue-500 transition-all"
-                                      style={{ width: `${progressPercent}%` }}
-                                    />
-                                  </div>
-                                  <span className="w-10 text-right text-[11px] text-muted-foreground">
-                                    {progressPercent}%
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-3 py-2 text-center">
-                          <Badge
-                            variant={statusVariant(document.status)}
-                            className={cn('border', meta.tone)}
-                          >
-                            <span className="inline-flex items-center gap-1">
-                              <Icon
-                                icon={meta.icon}
-                                className={cn(
-                                  'size-3',
-                                  document.status === 'indexing' &&
-                                    'animate-spin',
-                                )}
-                              />
-                              {meta.label}
-                            </span>
-                          </Badge>
-                        </td>
-                        <td className="px-3 py-2">
-                          <div className="leading-tight">
-                            <div>{document.chunkCount}</div>
-                            {document.totalTokens > 0 && (
-                              <div className="text-[11px] text-muted-foreground">
-                                {document.totalTokens} tokens
-                              </div>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-3 py-2 text-center text-muted-foreground">
-                          {new Date(document.updatedAt).toLocaleString()}
-                        </td>
-                        <td className="px-3 py-2">
-                          <div className="flex justify-center gap-1">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="xs"
-                              disabled={document.status !== 'ready'}
-                              onClick={() => void handlePreview(document)}
-                            >
-                              预览
-                            </Button>
-                            {document.status === 'error' && (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="xs"
-                                onClick={() => setErrorTarget(document)}
-                              >
-                                错误
-                              </Button>
-                            )}
-                            <Button
-                              type="button"
-                              variant={
-                                document.status === 'error'
-                                  ? 'secondary'
-                                  : 'ghost'
-                              }
-                              size="xs"
-                              disabled={isProcessing || isReindexing}
-                              onClick={() => void handleReindex(document)}
-                            >
-                              {isReindexing ? '提交中' : '重新入库'}
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="xs"
-                              disabled={isReindexing}
-                              onClick={() =>
-                                void handleDeleteDocument(document)
-                              }
-                            >
-                              删除
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {documents.length === 0 && (
-                    <tr>
-                      <td
-                        colSpan={5}
-                        className="px-3 py-10 text-center text-muted-foreground"
-                      >
-                        {loading ? '加载中' : '暂无文档'}
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-            {documentTotal > 0 && (
-              <DataTablePagination
-                page={documentPage}
-                pageSize={documentPageSize}
-                totalItems={documentTotal}
-                onPageChange={setDocumentPage}
-                onPageSizeChange={(nextPageSize) => {
-                  setDocumentPageSize(nextPageSize);
-                  setDocumentPage(1);
+            <div className="min-h-[24rem]">
+              <ProTable<KbDocument>
+                ref={tableRef}
+                columns={documentColumns}
+                request={loadDocuments}
+                params={documentTableParams}
+                search={false}
+                refreshable
+                pagination={{
+                  defaultPageSize: 30,
+                  pageSizeOptions: [10, 20, 30, 50, 100],
                 }}
               />
-            )}
+            </div>
           </CardContent>
         </Card>
 
