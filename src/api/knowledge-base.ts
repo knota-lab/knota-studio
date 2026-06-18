@@ -67,6 +67,11 @@ export interface IndexingProgress {
   current?: number | null;
   total?: number | null;
   stageStartedAt?: string | null;
+  heartbeatAt?: string | null;
+  health?: 'normal' | 'stale' | 'timeout' | 'finished' | string;
+  isStale?: boolean;
+  isHardTimeout?: boolean;
+  staleReason?: string | null;
 }
 
 export interface KbDocument {

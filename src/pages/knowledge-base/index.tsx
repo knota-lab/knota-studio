@@ -225,6 +225,12 @@ const formatErrorSummary = (message?: string | null) => {
 };
 
 const documentProgressLabel = (document: KbDocument) => {
+  if (document.indexingProgress?.isHardTimeout) {
+    return `超时于：${document.indexingProgress.label}`;
+  }
+  if (document.indexingProgress?.isStale) {
+    return `疑似卡住：${document.indexingProgress.label}`;
+  }
   if (document.status === 'error' && document.indexingProgress?.label) {
     return `失败于：${document.indexingProgress.label}`;
   }
@@ -242,6 +248,7 @@ const documentProgressMessage = (document: KbDocument) => {
     return statusMeta(document.status).description;
   }
   return (
+    document.indexingProgress?.staleReason ??
     document.indexingProgress?.message ??
     documentProgressLabel(document) ??
     statusMeta(document.status).description
@@ -266,6 +273,33 @@ const statusVariant = (status: string) => {
   if (status === 'error') return 'destructive';
   return 'secondary';
 };
+
+const documentStatusMeta = (document: KbDocument) => {
+  if (document.indexingProgress?.isHardTimeout) {
+    return {
+      icon: 'lucide:timer-off',
+      label: '超时',
+      description: document.indexingProgress.staleReason ?? '入库阶段超时',
+      tone: 'border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-900/30 dark:text-red-300',
+    };
+  }
+  if (document.indexingProgress?.isStale) {
+    return {
+      icon: 'lucide:triangle-alert',
+      label: '疑似卡住',
+      description:
+        document.indexingProgress.staleReason ?? '入库阶段长时间无进展',
+      tone: 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
+    };
+  }
+  return statusMeta(document.status);
+};
+
+const canReindexDocument = (document: KbDocument) =>
+  document.status === 'error' ||
+  Boolean(document.indexingProgress?.isStale) ||
+  Boolean(document.indexingProgress?.isHardTimeout) ||
+  !['pending', 'indexing'].includes(document.status);
 
 const statusMeta = (status: string) => {
   switch (status) {
@@ -776,6 +810,12 @@ const KnowledgeBasePage = () => {
             const isProcessing = ['pending', 'indexing'].includes(
               document.status,
             );
+            let progressTone = 'bg-blue-500';
+            if (document.indexingProgress?.isHardTimeout) {
+              progressTone = 'bg-red-500';
+            } else if (document.indexingProgress?.isStale) {
+              progressTone = 'bg-amber-500';
+            }
             return (
               <div className="min-w-0">
                 <div className="truncate font-medium">{document.title}</div>
@@ -797,7 +837,10 @@ const KnowledgeBasePage = () => {
                   <div className="mt-1 flex items-center gap-2">
                     <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
                       <div
-                        className="h-full rounded-full bg-blue-500 transition-all"
+                        className={cn(
+                          'h-full rounded-full transition-all',
+                          progressTone,
+                        )}
                         style={{ width: `${progressPercent}%` }}
                       />
                     </div>
@@ -811,7 +854,7 @@ const KnowledgeBasePage = () => {
           },
           status: ({ row }) => {
             const document = row.original;
-            const meta = statusMeta(document.status);
+            const meta = documentStatusMeta(document);
             return (
               <Badge
                 variant={statusVariant(document.status)}
@@ -822,7 +865,10 @@ const KnowledgeBasePage = () => {
                     icon={meta.icon}
                     className={cn(
                       'size-3',
-                      document.status === 'indexing' && 'animate-spin',
+                      document.status === 'indexing' &&
+                        !document.indexingProgress?.isStale &&
+                        !document.indexingProgress?.isHardTimeout &&
+                        'animate-spin',
                     )}
                   />
                   {meta.label}
@@ -847,10 +893,8 @@ const KnowledgeBasePage = () => {
             new Date(row.original.updatedAt).toLocaleString(),
           actions: ({ row }) => {
             const document = row.original;
-            const isProcessing = ['pending', 'indexing'].includes(
-              document.status,
-            );
             const isReindexing = reindexingIds.has(document.id);
+            const canReindex = canReindexDocument(document);
             return (
               <div className="flex justify-center gap-1">
                 <Button
@@ -876,7 +920,7 @@ const KnowledgeBasePage = () => {
                   type="button"
                   variant={document.status === 'error' ? 'secondary' : 'ghost'}
                   size="xs"
-                  disabled={isProcessing || isReindexing}
+                  disabled={!canReindex || isReindexing}
                   onClick={() => void handleReindex(document)}
                 >
                   {isReindexing ? '提交中' : '重新入库'}
