@@ -13,7 +13,14 @@ import {
   useReactTable,
 } from '@tanstack/react-table';
 import type { CSSProperties, ReactNode } from 'react';
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import {
   Tooltip,
   TooltipContent,
@@ -124,10 +131,40 @@ const OverflowCell = ({
 
   const measure = useCallback(() => {
     const el = spanRef.current;
-    if (el) {
-      setIsOverflowing(el.scrollWidth > el.clientWidth);
-    }
+    if (!el) return;
+
+    const next = el.scrollWidth > el.clientWidth + 1;
+    setIsOverflowing((current) => {
+      if (current === next) return current;
+      return next;
+    });
   }, []);
+
+  useLayoutEffect(() => {
+    if (!enableTooltip) return;
+
+    measure();
+  });
+
+  useEffect(() => {
+    if (!enableTooltip) return;
+
+    const el = spanRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [enableTooltip, measure]);
+
+  useEffect(() => {
+    if (enableTooltip) return;
+
+    setIsOverflowing(false);
+  }, [enableTooltip]);
 
   if (!enableTooltip) {
     return <span className="block truncate">{children}</span>;
@@ -137,14 +174,16 @@ const OverflowCell = ({
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
-          {/* biome-ignore lint/a11y/noStaticElementInteractions: tooltip trigger */}
-          <span ref={spanRef} className="block truncate" onMouseEnter={measure}>
+          <span ref={spanRef} className="block truncate">
             {children}
           </span>
         </TooltipTrigger>
         {isOverflowing && (
-          <TooltipContent className="max-h-[30vh] overflow-y-auto">
-            <div className="max-w-80 whitespace-pre-wrap break-words">
+          <TooltipContent
+            sideOffset={4}
+            className="max-w-[min(20rem,calc(100vw-2rem))] p-0 text-left"
+          >
+            <div className="max-h-[30vh] overflow-y-auto px-3 py-1.5 whitespace-pre-wrap break-words [scrollbar-gutter:stable]">
               {children}
             </div>
           </TooltipContent>
