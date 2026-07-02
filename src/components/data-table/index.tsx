@@ -181,9 +181,9 @@ const OverflowCell = ({
         {isOverflowing && (
           <TooltipContent
             sideOffset={4}
-            className="max-w-[min(20rem,calc(100vw-2rem))] p-0 text-left"
+            className="w-fit max-w-[min(20rem,calc(100vw-2rem))] p-0 text-left"
           >
-            <div className="max-h-[30vh] overflow-y-auto px-3 py-1.5 whitespace-pre-wrap break-words [scrollbar-gutter:stable]">
+            <div className="max-h-[30vh] overflow-y-auto px-3 py-1.5 wrap-break-word">
               {children}
             </div>
           </TooltipContent>
