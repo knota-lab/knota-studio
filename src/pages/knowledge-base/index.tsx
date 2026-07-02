@@ -45,6 +45,7 @@ import {
   type DocumentPreview,
   deleteDocument,
   deleteFolder,
+  deleteLibrary,
   getDocumentPreview,
   type KbDocument,
   type KbFolder,
@@ -570,6 +571,20 @@ const KnowledgeBasePage = () => {
     setSelection({ type: 'library', libraryId: library.id });
   }, [libraryName, loadLibraries]);
 
+  const handleDeleteLibrary = useCallback(
+    async (library: KbLibrary) => {
+      await deleteLibrary(library.id);
+      toast.success('知识库已删除');
+      if (selection?.libraryId === library.id) {
+        setPreviewRequest(null);
+        setDocuments([]);
+        setFolders([]);
+      }
+      await loadLibraries();
+    },
+    [loadLibraries, selection?.libraryId],
+  );
+
   const handleCreateFolder = useCallback(async () => {
     if (!selection) return;
     const name = folderName.trim();
@@ -1038,6 +1053,16 @@ const KnowledgeBasePage = () => {
                           />
                           <span>{library.name}</span>
                         </SidebarMenuButton>
+                        <SidebarMenuAction
+                          type="button"
+                          showOnHover
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void handleDeleteLibrary(library);
+                          }}
+                        >
+                          <Icon icon="lucide:trash-2" className="size-4" />
+                        </SidebarMenuAction>
                         {selection?.libraryId === library.id && (
                           <SidebarMenuSub>{renderFolders(null)}</SidebarMenuSub>
                         )}

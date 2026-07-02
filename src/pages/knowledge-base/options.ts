@@ -6,6 +6,7 @@ export {
   type DocumentPreview,
   deleteDocument,
   deleteFolder,
+  deleteLibrary,
   getDocumentPreview,
   type KbDocument,
   type KbFolder,
